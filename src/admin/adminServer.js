@@ -170,6 +170,31 @@ function createAdminServer(options) {
   const logger = options.logger;
   let server = null;
   let healthServer = null;
+  const clientManualSendLastAtByClientId = new Map();
+  const clientManualSendRateLimitMs = 60 * 1000;
+  const clientManualMessageForbiddenFields = [
+    "recipientUsers",
+    "recipientGroups",
+    "recipients",
+    "recipientIds",
+    "recipientGroupId",
+    "recipientScope",
+    "recipientType",
+    "targetUserId",
+    "targetClientId",
+    "clientIds",
+    "targetClientIds",
+    "targetUserIds",
+    "chatId",
+    "chatIds",
+    "groupChatId",
+    "groupChatIds",
+    "operatorUserId",
+    "updatedBy",
+    "createdBy",
+    "userId",
+    "sourceKey"
+  ];
 
   function normalizeManualWecomGroupOptions(body = {}) {
     const raw = body.wecomGroups && typeof body.wecomGroups === "object" && !Array.isArray(body.wecomGroups)
@@ -234,7 +259,113 @@ function createAdminServer(options) {
     };
   }
 
-  async function sendDesktopTipManualWecomGroups({ body, identity, desktopResult, prepared }) {
+  function clientSenderIdFromRequest(req, url, body = {}) {
+    return trimText(
+      (body && body.clientId)
+      || url.searchParams.get("clientId")
+      || req.headers["x-ea-tip-client-id"]
+      || ""
+    );
+  }
+
+  function requireRegisteredDesktopTipClient(req, res, url, body = {}) {
+    const clientId = clientSenderIdFromRequest(req, url, body);
+    if (!clientId) {
+      sendJson(res, 401, { ok: false, message: "缺少已登记 EA 桌面提醒客户端 clientId" });
+      return null;
+    }
+    const client = modules.desktopTip && typeof modules.desktopTip.getRegisteredClient === "function"
+      ? modules.desktopTip.getRegisteredClient(clientId)
+      : null;
+    if (!client) {
+      sendJson(res, 403, { ok: false, message: "当前客户端尚未登记，请先启动 EA 桌面提醒并成功连接一次" });
+      return null;
+    }
+    return client;
+  }
+
+  function rejectClientManualMessageForbiddenFields(body = {}) {
+    const forbiddenFields = clientManualMessageForbiddenFields
+      .filter((field) => Object.prototype.hasOwnProperty.call(body || {}, field));
+    const rawTargets = body && body.wecomGroups && Array.isArray(body.wecomGroups.targets)
+      ? body.wecomGroups.targets
+      : [];
+    const forbiddenNested = rawTargets.some((target) => target && typeof target === "object" && (
+      Object.prototype.hasOwnProperty.call(target, "chatId")
+      || Object.prototype.hasOwnProperty.call(target, "chatIds")
+      || Object.prototype.hasOwnProperty.call(target, "userId")
+      || Object.prototype.hasOwnProperty.call(target, "targetUserId")
+      || Object.prototype.hasOwnProperty.call(target, "targetClientId")
+      || Object.prototype.hasOwnProperty.call(target, "operatorUserId")
+    ));
+    if (forbiddenFields.length > 0) {
+      const error = new Error("客户端发送通知不允许指定接收人、群 chatId、操作者或任意目标参数");
+      error.statusCode = 400;
+      error.forbiddenFields = forbiddenFields;
+      throw error;
+    }
+    if (forbiddenNested) {
+      const error = new Error("客户端发送通知的企业微信群只允许使用服务端返回的 groupId 和通知方式");
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  function publicClientWecomGroups(status = {}) {
+    const groups = Array.isArray(status.groups) ? status.groups : [];
+    return {
+      enabled: Boolean(status.enabled),
+      groupCount: groups.length,
+      groups: groups.map((group) => ({
+        groupId: trimText(group && group.groupId),
+        displayName: trimText(group && group.displayName),
+        source: trimText(group && group.source),
+        boundAt: trimText(group && group.boundAt),
+        updatedAt: trimText(group && group.updatedAt)
+      })).filter((group) => group.groupId)
+    };
+  }
+
+  function assertClientManualRateLimit(clientId) {
+    const key = trimText(clientId);
+    const now = Date.now();
+    const lastAt = Number(clientManualSendLastAtByClientId.get(key) || 0);
+    const waitMs = clientManualSendRateLimitMs - (now - lastAt);
+    if (waitMs > 0) {
+      const error = new Error(`发送太频繁，请 ${Math.ceil(waitMs / 1000)} 秒后再试`);
+      error.statusCode = 429;
+      error.retryAfterSeconds = Math.ceil(waitMs / 1000);
+      throw error;
+    }
+    clientManualSendLastAtByClientId.set(key, now);
+  }
+
+  function validateClientManualMessageContent(body = {}) {
+    const title = trimText(body.title);
+    const messageBody = trimText(body.body || body.content);
+    if (!title) {
+      const error = new Error("普通桌面消息标题不能为空");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!messageBody) {
+      const error = new Error("普通桌面消息内容不能为空");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (title.length > 80) {
+      const error = new Error("普通桌面消息标题不能超过 80 个字符");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (messageBody.length > 1000) {
+      const error = new Error("普通桌面消息内容不能超过 1000 个字符");
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  async function sendDesktopTipManualWecomGroups({ body, identity, desktopResult, prepared, sourceKey = "admin_manual_message" }) {
     const groupPlan = prepared || prepareDesktopTipManualWecomGroups(body);
     if (!groupPlan.enabled) {
       return disabledManualWecomGroupResult();
@@ -279,7 +410,7 @@ function createAdminServer(options) {
     const failedCount = results.length - successCount;
     if (logger && typeof logger.info === "function") {
       logger.info("Desktop tip manual WeCom group notification finished", {
-        sourceKey: "admin_manual_message",
+        sourceKey,
         batchId: desktopResult && desktopResult.batchId ? desktopResult.batchId : "",
         operatorUserId: maskLogId(identity && identity.userId),
         requestedCount: targets.length,
@@ -740,6 +871,104 @@ function createAdminServer(options) {
         ok: true,
         desktopTip: status
       });
+      return true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/desktop-tip/client-send/options") {
+      const client = requireRegisteredDesktopTipClient(req, res, url);
+      if (!client) return true;
+      const desktopTipStatus = modules.desktopTip && typeof modules.desktopTip.getStatus === "function"
+        ? modules.desktopTip.getStatus()
+        : {};
+      const wecomGroups = modules.desktopTip && typeof modules.desktopTip.getWecomGroupRegistryStatus === "function"
+        ? publicClientWecomGroups(modules.desktopTip.getWecomGroupRegistryStatus())
+        : { enabled: false, groups: [], groupCount: 0 };
+      logger.info("Desktop tip client send options requested", {
+        sourceKey: "client_manual_message",
+        clientId: maskLogId(client.clientId),
+        clientVersion: trimText(client.clientVersion),
+        registeredClientCount: Number(desktopTipStatus.clientRegistry && desktopTipStatus.clientRegistry.registeredClientCount || 0),
+        wecomGroupCount: Number(wecomGroups.groupCount || 0)
+      });
+      sendJson(res, 200, {
+        ok: true,
+        sender: {
+          clientId: maskLogId(client.clientId),
+          clientVersion: trimText(client.clientVersion) || "unknown",
+          source: "registered_desktop_client"
+        },
+        registeredClientCount: Number(desktopTipStatus.clientRegistry && desktopTipStatus.clientRegistry.registeredClientCount || 0),
+        limits: {
+          titleMax: 80,
+          bodyMax: 1000,
+          rateLimitSeconds: Math.ceil(clientManualSendRateLimitMs / 1000)
+        },
+        wecomGroups
+      });
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/desktop-tip/client-send/manual-message") {
+      const body = await readRequestBody(req);
+      const client = requireRegisteredDesktopTipClient(req, res, url, body);
+      if (!client) return true;
+      try {
+        rejectClientManualMessageForbiddenFields(body);
+        validateClientManualMessageContent(body);
+        const preparedWecomGroups = prepareDesktopTipManualWecomGroups(body);
+        assertClientManualRateLimit(client.clientId);
+        const result = modules.desktopTip && typeof modules.desktopTip.createManualMessage === "function"
+          ? modules.desktopTip.createManualMessage({
+            title: body.title,
+            body: body.body || body.content,
+            operatorUserId: `client:${client.clientId}`,
+            operatorName: "EA 桌面提醒客户端",
+            sourceKey: "client_manual_message"
+          })
+          : { ok: false, message: "EA 桌面提醒客户端发送模块未启用" };
+        const wecomGroups = await sendDesktopTipManualWecomGroups({
+          body,
+          identity: {
+            userId: `client:${client.clientId}`,
+            name: "EA 桌面提醒客户端"
+          },
+          desktopResult: result,
+          prepared: preparedWecomGroups,
+          sourceKey: "client_manual_message"
+        });
+        logger.info("Desktop tip client manual message API requested", {
+          sourceKey: "client_manual_message",
+          batchId: result.batchId || "",
+          senderClientId: maskLogId(client.clientId),
+          senderClientVersion: trimText(client.clientVersion) || "unknown",
+          recipientCount: Number(result.recipientCount || 0),
+          titleLength: String(body.title || "").trim().length,
+          bodyLength: String(body.body || body.content || "").trim().length,
+          queued: Number(result.queuedCount || 0),
+          failed: Number(result.failedCount || 0),
+          wecomGroupEnabled: Boolean(wecomGroups.enabled),
+          wecomGroupSuccess: Number(wecomGroups.successCount || 0),
+          wecomGroupFailed: Number(wecomGroups.failedCount || 0),
+          ok: Boolean(result.ok)
+        });
+        sendJson(res, result.ok ? 200 : 503, {
+          ...result,
+          sender: {
+            clientId: maskLogId(client.clientId),
+            source: "registered_desktop_client"
+          },
+          wecomGroups
+        });
+      } catch (error) {
+        if (error && error.statusCode === 429) {
+          logger.warn("Desktop tip client manual message rate limited", {
+            sourceKey: "client_manual_message",
+            senderClientId: maskLogId(client.clientId),
+            retryAfterSeconds: error.retryAfterSeconds || 0
+          });
+        }
+        throw error;
+      }
       return true;
     }
 

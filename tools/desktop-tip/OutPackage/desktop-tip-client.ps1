@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Script:Version = "0.3.4"
+$Script:Version = "0.4.0"
 $Script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:ConfigPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $Script:Root "config\desktop-tip-client.config.json" }
 $Script:LogDir = Join-Path $Script:Root "logs"
@@ -472,6 +472,298 @@ function Poll-Events {
   }
 }
 
+function Get-ClientSendOptions {
+  $base = Api-Base
+  $client = [uri]::EscapeDataString([string]$Script:ClientId)
+  $version = [uri]::EscapeDataString([string]$Script:Version)
+  $uri = "$base/api/desktop-tip/client-send/options?clientId=$client&clientVersion=$version"
+  Invoke-RestMethod -Method Get -Uri $uri -Headers (Request-Headers) -TimeoutSec 10
+}
+
+function Send-ClientManualMessage {
+  param(
+    [string]$Title,
+    [string]$Body,
+    [bool]$WecomEnabled,
+    [object[]]$Targets
+  )
+  $base = Api-Base
+  $payload = [ordered]@{
+    clientId = [string]$Script:ClientId
+    clientVersion = [string]$Script:Version
+    title = $Title
+    body = $Body
+    wecomGroups = @{
+      enabled = $WecomEnabled
+      targets = @($Targets)
+    }
+  }
+  $json = $payload | ConvertTo-Json -Depth 8
+  Invoke-RestMethod -Method Post -Uri "$base/api/desktop-tip/client-send/manual-message" -Headers (Request-Headers) -Body $json -ContentType "application/json; charset=utf-8" -TimeoutSec 20
+}
+
+function Format-ClientSendResult {
+  param([object]$Result)
+  $desktopQueued = [int]($Result.queuedCount)
+  $desktopTotal = [int]($Result.recipientCount)
+  $text = (TextFromCodes @(24050,21457,36865,65292,26700,38754,25490,38431,32)) + $desktopQueued + "/" + $desktopTotal
+  if ($Result.wecomGroups -and $Result.wecomGroups.enabled) {
+    $success = [int]$Result.wecomGroups.successCount
+    $requested = [int]$Result.wecomGroups.requestedCount
+    $failed = [int]$Result.wecomGroups.failedCount
+    $text += (TextFromCodes @(65292,32676,25104,21151,32)) + $success + "/" + $requested
+    if ($failed -gt 0) {
+      $failedNames = @()
+      foreach ($item in @($Result.wecomGroups.results)) {
+        if (-not $item.ok) {
+          $name = [string]$item.displayName
+          if (-not $name) { $name = [string]$item.groupId }
+          $reason = [string]$item.message
+          if (-not $reason) { $reason = [string]$item.errmsg }
+          $failedNames += ($name + ":" + $reason)
+        }
+      }
+      $text += (TextFromCodes @(65292,22833,36133,65306)) + ($failedNames -join "; ")
+    }
+  }
+  return $text
+}
+
+function Show-SendNotificationWindow {
+  Load-Config
+  Ensure-ClientId
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = TextFromCodes @(21457,36865,36890,30693)
+  $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $form.Width = 560
+  $form.Height = 620
+  $form.MinimumSize = New-Object System.Drawing.Size(520, 560)
+  $form.BackColor = [System.Drawing.Color]::White
+  $form.ShowInTaskbar = $true
+
+  $titleLabel = New-Object System.Windows.Forms.Label
+  $titleLabel.Text = TextFromCodes @(28040,24687,26631,39064)
+  $titleLabel.Left = 18
+  $titleLabel.Top = 18
+  $titleLabel.Width = 500
+  $titleLabel.Height = 22
+  $titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold)
+  $form.Controls.Add($titleLabel)
+
+  $titleBox = New-Object System.Windows.Forms.TextBox
+  $titleBox.Left = 18
+  $titleBox.Top = 44
+  $titleBox.Width = 504
+  $titleBox.Height = 28
+  $titleBox.Text = TextFromCodes @(69,65,26700,38754,25552,37266,36890,30693)
+  $form.Controls.Add($titleBox)
+
+  $bodyLabel = New-Object System.Windows.Forms.Label
+  $bodyLabel.Text = TextFromCodes @(28040,24687,20869,23481)
+  $bodyLabel.Left = 18
+  $bodyLabel.Top = 84
+  $bodyLabel.Width = 500
+  $bodyLabel.Height = 22
+  $bodyLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold)
+  $form.Controls.Add($bodyLabel)
+
+  $bodyBox = New-Object System.Windows.Forms.RichTextBox
+  $bodyBox.Left = 18
+  $bodyBox.Top = 110
+  $bodyBox.Width = 504
+  $bodyBox.Height = 160
+  $bodyBox.WordWrap = $true
+  $bodyBox.ScrollBars = [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
+  $bodyBox.DetectUrls = $false
+  $bodyBox.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10)
+  $form.Controls.Add($bodyBox)
+
+  $scopeLabel = New-Object System.Windows.Forms.Label
+  $scopeLabel.Left = 18
+  $scopeLabel.Top = 282
+  $scopeLabel.Width = 504
+  $scopeLabel.Height = 24
+  $scopeLabel.Text = TextFromCodes @(26700,38754,36890,30693,65306,20840,37096,24050,30331,35760,23458,25143,31471,31471)
+  $form.Controls.Add($scopeLabel)
+
+  $wecomCheck = New-Object System.Windows.Forms.CheckBox
+  $wecomCheck.Left = 18
+  $wecomCheck.Top = 314
+  $wecomCheck.Width = 260
+  $wecomCheck.Height = 24
+  $wecomCheck.Text = TextFromCodes @(21516,26102,21457,36865,20225,19994,24494,20449,32676)
+  $form.Controls.Add($wecomCheck)
+
+  $modeLabel = New-Object System.Windows.Forms.Label
+  $modeLabel.Left = 292
+  $modeLabel.Top = 316
+  $modeLabel.Width = 90
+  $modeLabel.Height = 22
+  $modeLabel.Text = TextFromCodes @(36890,30693,26041,24335)
+  $form.Controls.Add($modeLabel)
+
+  $modeBox = New-Object System.Windows.Forms.ComboBox
+  $modeBox.Left = 386
+  $modeBox.Top = 312
+  $modeBox.Width = 136
+  $modeBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$modeBox.Items.Add((TextFromCodes @(26222,36890,36890,30693)))
+  [void]$modeBox.Items.Add((TextFromCodes @(64,25152,26377,20154)))
+  $modeBox.SelectedIndex = 0
+  $form.Controls.Add($modeBox)
+
+  $groupList = New-Object System.Windows.Forms.CheckedListBox
+  $groupList.Left = 18
+  $groupList.Top = 348
+  $groupList.Width = 504
+  $groupList.Height = 110
+  $groupList.CheckOnClick = $true
+  $groupList.DisplayMember = "DisplayName"
+  $groupList.HorizontalScrollbar = $true
+  $form.Controls.Add($groupList)
+
+  $statusLabel = New-Object System.Windows.Forms.Label
+  $statusLabel.Left = 18
+  $statusLabel.Top = 468
+  $statusLabel.Width = 504
+  $statusLabel.Height = 46
+  $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#334155")
+  $form.Controls.Add($statusLabel)
+
+  $sendButton = New-Object System.Windows.Forms.Button
+  $sendButton.Text = TextFromCodes @(21457,36865)
+  $sendButton.Left = 326
+  $sendButton.Top = 526
+  $sendButton.Width = 92
+  $sendButton.Height = 34
+  $sendButton.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#1677ff")
+  $sendButton.ForeColor = [System.Drawing.Color]::White
+  $sendButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $sendButton.FlatAppearance.BorderSize = 0
+  $form.Controls.Add($sendButton)
+
+  $closeButton = New-Object System.Windows.Forms.Button
+  $closeButton.Text = TextFromCodes @(20851,38381)
+  $closeButton.Left = 430
+  $closeButton.Top = 526
+  $closeButton.Width = 92
+  $closeButton.Height = 34
+  $closeButton.Add_Click({ $form.Close() })
+  $form.Controls.Add($closeButton)
+
+  $groupList.Enabled = $false
+  $modeBox.Enabled = $false
+  $sendButton.Enabled = $false
+  $statusLabel.Text = TextFromCodes @(27491,22312,21152,36733,21457,36865,36873,39033)
+
+  try {
+    $options = Get-ClientSendOptions
+    $registeredCount = [int]$options.registeredClientCount
+    $scopeLabel.Text = (TextFromCodes @(26700,38754,36890,30693,65306,20840,37096,24050,30331,35760,23458,25143,31471,32,40)) + $registeredCount + (TextFromCodes @(21488,41))
+    foreach ($group in @($options.wecomGroups.groups)) {
+      $item = New-Object psobject -Property @{
+        GroupId = [string]$group.groupId
+        DisplayName = [string]$group.displayName
+      }
+      [void]$groupList.Items.Add($item)
+    }
+    if ($registeredCount -le 0) {
+      $statusLabel.Text = TextFromCodes @(24403,21069,27809,26377,24050,30331,35760,23458,25143,31471)
+    } else {
+      $sendButton.Enabled = $true
+      $statusLabel.Text = (TextFromCodes @(21487,21457,36865,21040,32)) + $registeredCount + (TextFromCodes @(32,21488,24050,30331,35760,23458,25143,31471))
+    }
+    if ($groupList.Items.Count -gt 0) {
+      $wecomCheck.Enabled = $true
+    } else {
+      $wecomCheck.Enabled = $false
+    }
+  } catch {
+    $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+    $statusLabel.Text = (TextFromCodes @(21152,36733,21457,36865,36873,39033,22833,36133,65306)) + $_.Exception.Message
+    Write-TipLog "WARN" "Client send options load failed" @{
+      clientId = Mask-LogId ([string]$Script:ClientId)
+      message = $_.Exception.Message
+    }
+  }
+
+  $wecomCheck.Add_CheckedChanged({
+    $groupList.Enabled = [bool]$wecomCheck.Checked
+    $modeBox.Enabled = [bool]$wecomCheck.Checked
+  })
+
+  $sendButton.Add_Click({
+    if (-not $sendButton.Enabled) {
+      return
+    }
+    $title = ([string]$titleBox.Text).Trim()
+    $body = ([string]$bodyBox.Text).Trim()
+    if (-not $title) {
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+      $statusLabel.Text = TextFromCodes @(28040,24687,26631,39064,19981,33021,20026,31354)
+      return
+    }
+    if (-not $body) {
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+      $statusLabel.Text = TextFromCodes @(28040,24687,20869,23481,19981,33021,20026,31354)
+      return
+    }
+    if ($title.Length -gt 80) {
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+      $statusLabel.Text = TextFromCodes @(28040,24687,26631,39064,19981,33021,36229,36807,32,56,48,32,20010,23383)
+      return
+    }
+    if ($body.Length -gt 1000) {
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+      $statusLabel.Text = TextFromCodes @(28040,24687,20869,23481,19981,33021,36229,36807,32,49,48,48,48,32,20010,23383)
+      return
+    }
+    $targets = @()
+    if ($wecomCheck.Checked) {
+      foreach ($item in @($groupList.CheckedItems)) {
+        $mentionMode = if ($modeBox.SelectedIndex -eq 1) { "all" } else { "none" }
+        $targets += @{ groupId = [string]$item.GroupId; mentionMode = $mentionMode }
+      }
+      if ($targets.Count -le 0) {
+        $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+        $statusLabel.Text = TextFromCodes @(21246,36873,20225,19994,24494,20449,32676,36890,30693,21518,33267,23569,36873,25321,32,49,32,20010,24050,32465,23450,32676)
+        return
+      }
+    }
+    $sendButton.Enabled = $false
+    $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#334155")
+    $statusLabel.Text = TextFromCodes @(27491,22312,21457,36865,65292,35831,31245,20505)
+    try {
+      $result = Send-ClientManualMessage -Title $title -Body $body -WecomEnabled ([bool]$wecomCheck.Checked) -Targets $targets
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#16a34a")
+      $statusLabel.Text = Format-ClientSendResult -Result $result
+      Write-TipLog "INFO" "Client manual message submitted" @{
+        queuedCount = [int]$result.queuedCount
+        recipientCount = [int]$result.recipientCount
+        wecomGroupEnabled = [bool]($result.wecomGroups -and $result.wecomGroups.enabled)
+        wecomGroupSuccess = [int]($result.wecomGroups.successCount)
+        wecomGroupFailed = [int]($result.wecomGroups.failedCount)
+      }
+    } catch {
+      $statusLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#dc2626")
+      $statusLabel.Text = (TextFromCodes @(21457,36865,22833,36133,65306)) + $_.Exception.Message
+      Write-TipLog "WARN" "Client manual message submit failed" @{
+        clientId = Mask-LogId ([string]$Script:ClientId)
+        titleLength = $title.Length
+        bodyLength = $body.Length
+        message = $_.Exception.Message
+      }
+    } finally {
+      $sendButton.Enabled = $true
+    }
+  })
+
+  $form.ShowDialog() | Out-Null
+}
+
 function Run-SelfTest {
   Load-Config
   Ensure-ClientId
@@ -605,6 +897,8 @@ function Start-TipWindow {
   $form.Controls.Add($dismissButton)
 
   $exitMenu = New-Object System.Windows.Forms.ContextMenuStrip
+  $sendItem = $exitMenu.Items.Add((TextFromCodes @(21457,36865,36890,30693)))
+  $sendItem.Add_Click({ Show-SendNotificationWindow })
   $updateItem = $exitMenu.Items.Add((TextFromCodes @(26816,26597,26356,26032)))
   $updateItem.Add_Click({ Check-ClientUpdate -Interactive })
   $exitItem = $exitMenu.Items.Add((TextFromCodes @(0x9000,0x51FA,0x20,0x45,0x41,0x20,0x54,0x69,0x70,0x73)))

@@ -6,9 +6,10 @@ const path = require("path");
 const { resolveProjectPath } = require("../../utils/paths");
 const { createProductionMaintenanceManager } = require("./productionMaintenance");
 
-const DEFAULT_VERSION = "0.3.2";
+const DEFAULT_VERSION = "0.4.0";
 const TERMINAL_ACTIONS = new Set(["dismissed", "opened", "done"]);
 const MANUAL_MESSAGE_SOURCE_KEY = "admin_manual_message";
+const CLIENT_MANUAL_MESSAGE_SOURCE_KEY = "client_manual_message";
 const WECOM_GROUP_REGISTRY_SOURCE_KEY = "desktop_tip_wecom_group_registry";
 const MANUAL_MESSAGE_TITLE_MAX = 80;
 const MANUAL_MESSAGE_BODY_MAX = 1000;
@@ -396,6 +397,14 @@ function createDesktopTipModule(options = {}) {
       }
     }
     return [...byClient.values()];
+  }
+
+  function getRegisteredClient(clientId) {
+    const normalizedClient = lowerText(clientId);
+    if (!normalizedClient) {
+      return null;
+    }
+    return getRegisteredClients().find((client) => lowerText(client.clientId) === normalizedClient) || null;
   }
 
   function getClientRegistryStatus() {
@@ -1018,6 +1027,12 @@ function createDesktopTipModule(options = {}) {
     if (!operatorUserId) {
       throw createHttpError(401, "普通桌面消息发送人必须来自已签名登录会话");
     }
+    const sourceKey = rawInput.sourceKey === CLIENT_MANUAL_MESSAGE_SOURCE_KEY
+      ? CLIENT_MANUAL_MESSAGE_SOURCE_KEY
+      : MANUAL_MESSAGE_SOURCE_KEY;
+    const sourceLabel = sourceKey === CLIENT_MANUAL_MESSAGE_SOURCE_KEY
+      ? "来源：EA 桌面提醒客户端发送"
+      : "来源：EA 管理后台普通消息测试";
 
     const title = trimText(rawInput.title);
     const body = trimText(rawInput.body || rawInput.content);
@@ -1055,13 +1070,13 @@ function createDesktopTipModule(options = {}) {
           title,
           body,
           detailLines: [
-            "来源：EA 管理后台普通消息测试",
+            sourceLabel,
             `批次：${batchId}`
           ],
           priority: "normal",
           ttlMinutes: config.ttlMinutes,
           meta: {
-            sourceKey: MANUAL_MESSAGE_SOURCE_KEY,
+            sourceKey,
             batchId,
             createdAt
           }
@@ -1077,7 +1092,7 @@ function createDesktopTipModule(options = {}) {
 
     if (logger && typeof logger.info === "function") {
       logger.info("Desktop tip manual message batch queued", {
-        sourceKey: MANUAL_MESSAGE_SOURCE_KEY,
+        sourceKey,
         batchId,
         operatorConfigured: Boolean(operatorUserId),
         operatorUserId: maskLogId(operatorUserId),
@@ -1091,7 +1106,7 @@ function createDesktopTipModule(options = {}) {
 
     return {
       ok: failed.length === 0,
-      sourceKey: MANUAL_MESSAGE_SOURCE_KEY,
+      sourceKey,
       batchId,
       recipientType: "client",
       recipientScope: "all_registered_clients",
@@ -1162,6 +1177,7 @@ function createDesktopTipModule(options = {}) {
     getStatus,
     getRegisteredUserIds,
     getRegisteredClients,
+    getRegisteredClient,
     getClientRegistryStatus,
     getWecomGroupRegistryStatus,
     resolveWecomGroupTargets,

@@ -56,7 +56,7 @@ function createModule(root, overrides = {}) {
     moduleConfig: {
       enabled: true,
       name: "EA 桌面提醒",
-      version: "0.3.2",
+      version: "0.4.0",
       storePath: tempFile(root, "events.json"),
       ttlMinutes: 240,
       clientRegistry: {
@@ -489,6 +489,255 @@ async function runManualMessageApiTests() {
   }
 }
 
+async function runClientManualMessageApiTests() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ea-desktop-tip-client-manual-api-"));
+  const logs = [];
+  const desktopTip = createModule(root, { logs });
+  const groupSends = [];
+  const failedChatIds = new Set();
+  const robotServer = {
+    sendMarkdownMessage: async (chatId, content, options = {}) => {
+      groupSends.push({ chatId, content, options });
+      if (failedChatIds.has(chatId)) {
+        throw new Error(`mock group failed ${chatId}`);
+      }
+      return { errcode: 0 };
+    }
+  };
+  const logger = { info() {}, warn() {}, error() {} };
+  const adminServer = createAdminServer({
+    config: {
+      app: {
+        server: { host: "127.0.0.1", port: 0, https: { enabled: false } },
+        runtime: { logLevel: "info" },
+        security: { showSecretsInAdmin: false }
+      },
+      modules: { modules: {}, monitors: {}, notification: {} },
+      routes: {}
+    },
+    router: { handleMessage: async () => ({ ok: true }) },
+    modules: { desktopTip },
+    robotServer,
+    robotDiagnostics: {},
+    monitorManager: { getStatus: () => ({}) },
+    notificationCenter: { getStatus: () => ({}) },
+    wecomAppCallback: null,
+    logger
+  });
+  const server = adminServer.start();
+  if (!server.listening) {
+    await new Promise((resolve) => server.once("listening", resolve));
+  }
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    let response = await requestJson(baseUrl, "GET", "/api/desktop-tip/client-send/options");
+    assert.equal(response.status, 401, "client send options without clientId must return 401");
+
+    response = await requestJson(baseUrl, "GET", "/api/desktop-tip/client-send/options?clientId=missing_client");
+    assert.equal(response.status, 403, "unregistered client must not read send options");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "missing_client",
+      title: "client send",
+      body: "body"
+    });
+    assert.equal(response.status, 403, "unregistered client must not send");
+
+    pollDevice(desktopTip, "client_sender_a", "0.4.0");
+    pollDevice(desktopTip, "client_sender_b", "0.4.0");
+    pollDevice(desktopTip, "client_sender_c", "0.4.0");
+
+    response = await requestJson(baseUrl, "GET", "/api/desktop-tip/client-send/options?clientId=client_sender_a&clientVersion=0.4.0");
+    assert.equal(response.status, 200, "registered client can read send options");
+    assert.equal(response.data.registeredClientCount, 3);
+    assert.equal(response.data.limits.rateLimitSeconds, 60);
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "",
+      body: "body"
+    });
+    assert.equal(response.status, 400, "client send empty title must return 400");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "title",
+      body: ""
+    });
+    assert.equal(response.status, 400, "client send empty body must return 400");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "t".repeat(81),
+      body: "body"
+    });
+    assert.equal(response.status, 400, "client send title max must be enforced");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "title",
+      body: "b".repeat(1001)
+    });
+    assert.equal(response.status, 400, "client send body max must be enforced");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "title",
+      body: "body",
+      operatorUserId: "forged_operator"
+    });
+    assert.equal(response.status, 400, "client send must reject forged operator");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "title",
+      body: "body",
+      targetClientId: "client_sender_b"
+    });
+    assert.equal(response.status, 400, "client send must reject caller-specified targetClientId");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "title",
+      body: "body",
+      wecomGroups: {
+        enabled: true,
+        targets: [{ groupId: "g1", chatId: "chat_a", mentionMode: "all" }]
+      }
+    });
+    assert.equal(response.status, 400, "client send must reject nested chatId");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      clientVersion: "0.4.0",
+      title: "Client desktop message",
+      body: "client body",
+      wecomGroups: { enabled: false, targets: [] }
+    });
+    assert.equal(response.status, 200, "registered client can send desktop notification");
+    assert.equal(response.data.sourceKey, "client_manual_message");
+    assert.equal(response.data.recipientCount, 3);
+    assert.equal(response.data.queuedCount, 3);
+    assert.equal(response.data.wecomGroups.enabled, false);
+    assert.equal(response.data.sender.source, "registered_desktop_client");
+    assert.equal(groupSends.length, 0, "desktop-only client send must not send group notification");
+
+    const senderAEvents = pollDevice(desktopTip, "client_sender_a", "0.4.0");
+    const senderBEvents = pollDevice(desktopTip, "client_sender_b", "0.4.0");
+    assert.equal(senderAEvents.filter((event) => event.meta && event.meta.sourceKey === "client_manual_message").length, 1, "sender A must receive client message as a registered device");
+    assert.equal(senderBEvents.filter((event) => event.meta && event.meta.sourceKey === "client_manual_message").length, 1, "sender B must receive isolated client message");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_a",
+      title: "duplicate",
+      body: "duplicate"
+    });
+    assert.equal(response.status, 429, "client send duplicate click must be rate limited");
+
+    const bindA = desktopTip.captureWecomGroupBindingMessage({
+      text: "@1号机器人 绑定M04通知群 客户端群A",
+      sender: { chatType: "group", chatId: "client_chat_group_a", userId: "ordinary_user", name: "Ordinary User" }
+    });
+    const bindB = desktopTip.captureWecomGroupBindingMessage({
+      text: "@1号机器人 绑定M04通知群 客户端群B",
+      sender: { chatType: "group", chatId: "client_chat_group_b", userId: "ordinary_user", name: "Ordinary User" }
+    });
+    assert.equal(bindA.ok, true);
+    assert.equal(bindB.ok, true);
+
+    response = await requestJson(baseUrl, "GET", "/api/desktop-tip/client-send/options?clientId=client_sender_b");
+    assert.equal(response.status, 200);
+    assert.equal(response.data.wecomGroups.groupCount, 2);
+    assert.ok(response.data.wecomGroups.groups.every((group) => !Object.prototype.hasOwnProperty.call(group, "chatId")), "client options must not expose chatId");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_b",
+      title: "group missing target",
+      body: "body",
+      wecomGroups: { enabled: true, targets: [] }
+    });
+    assert.equal(response.status, 400, "checked group notification without selected group must return 400");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_b",
+      title: "group all",
+      body: "body",
+      wecomGroups: {
+        enabled: true,
+        targets: [{ groupId: bindA.group.groupId, mentionMode: "all" }]
+      }
+    });
+    assert.equal(response.status, 200, "registered client can send optional @all group notification");
+    assert.equal(response.data.queuedCount, 3, "desktop delivery must still queue before group send");
+    assert.equal(response.data.wecomGroups.successCount, 1);
+    assert.equal(groupSends[groupSends.length - 1].chatId, "client_chat_group_a");
+    assert.equal(groupSends[groupSends.length - 1].options.mentionAll, true, "@all option must reach robot sender");
+    assert.match(groupSends[groupSends.length - 1].content, /@所有人/, "@all content must be in final markdown payload");
+
+    failedChatIds.add("client_chat_group_b");
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+      clientId: "client_sender_c",
+      title: "partial group",
+      body: "body",
+      wecomGroups: {
+        enabled: true,
+        targets: [
+          { groupId: bindA.group.groupId, mentionMode: "none" },
+          { groupId: bindB.group.groupId, mentionMode: "none" }
+        ]
+      }
+    });
+    assert.equal(response.status, 200, "partial group failure must not roll back client desktop delivery");
+    assert.equal(response.data.queuedCount, 3);
+    assert.equal(response.data.wecomGroups.requestedCount, 2);
+    assert.equal(response.data.wecomGroups.successCount, 1);
+    assert.equal(response.data.wecomGroups.failedCount, 1);
+    assert.ok(response.data.wecomGroups.results.some((item) => !item.ok && /mock group failed/.test(item.message)), "client send failed group reason must be returned");
+
+    const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ea-desktop-tip-client-manual-empty-"));
+    const emptyDesktopTip = createModule(emptyRoot);
+    const emptyAdminServer = createAdminServer({
+      config: {
+        app: {
+          server: { host: "127.0.0.1", port: 0, https: { enabled: false } },
+          runtime: { logLevel: "info" },
+          security: { showSecretsInAdmin: false }
+        },
+        modules: { modules: {}, monitors: {}, notification: {} },
+        routes: {}
+      },
+      router: { handleMessage: async () => ({ ok: true }) },
+      modules: { desktopTip: emptyDesktopTip },
+      robotServer,
+      robotDiagnostics: {},
+      monitorManager: { getStatus: () => ({}) },
+      notificationCenter: { getStatus: () => ({}) },
+      wecomAppCallback: null,
+      logger
+    });
+    const emptyServer = emptyAdminServer.start();
+    if (!emptyServer.listening) {
+      await new Promise((resolve) => emptyServer.once("listening", resolve));
+    }
+    const emptyBaseUrl = `http://127.0.0.1:${emptyServer.address().port}`;
+    try {
+      response = await requestJson(emptyBaseUrl, "POST", "/api/desktop-tip/client-send/manual-message", {
+        clientId: "never_registered",
+        title: "empty",
+        body: "empty"
+      });
+      assert.equal(response.status, 403, "zero registered clients and unregistered sender must reject");
+    } finally {
+      emptyAdminServer.stop();
+      emptyDesktopTip.stop();
+    }
+  } finally {
+    adminServer.stop();
+    desktopTip.stop();
+  }
+}
+
 function runClientRegistryTests() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ea-desktop-tip-clients-"));
   const logs = [];
@@ -851,7 +1100,7 @@ async function main() {
   const psClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const psPackageClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), "utf8");
   for (const content of [psClient, psPackageClient]) {
-    assert.match(content, /\$Script:Version = "0\.3\.4"/, "client version must be v0.3.4");
+    assert.match(content, /\$Script:Version = "0\.4\.0"/, "client version must be v0.4.0");
     assert.match(content, /Maintenance-StatusText/, "client must include maintenance panel formatter");
     assert.match(content, /TextFromCodes @\(27491,24335,26381/, "client must avoid raw Chinese literals for old PowerShell parsing");
     assert.match(content, /clientVersion=\$version/, "client poll must report clientVersion for registry");
@@ -860,6 +1109,12 @@ async function main() {
     assert.doesNotMatch(content, /Ensure-UserId/, "client must not require UserID");
     assert.match(content, /Check-ClientUpdate/, "client must include online update check");
     assert.match(content, /updateCheckMinutes/, "client config must include update interval");
+    assert.match(content, /Show-SendNotificationWindow/, "client must include send notification window");
+    assert.match(content, /client-send\/options/, "client must read send options through clientId API");
+    assert.match(content, /client-send\/manual-message/, "client must submit manual message through clientId API");
+    assert.match(content, /TextFromCodes @\(21457,36865,36890,30693\)/, "right click menu must expose 发送通知");
+    assert.doesNotMatch(content, /指定人员/, "client must not expose @指定人员 in this phase");
+    assert.match(content, /\$sendButton\.Enabled = \$false[\s\S]*?Send-ClientManualMessage[\s\S]*?\$sendButton\.Enabled = \$true/, "client send button must lock during submit");
     assert.match(content, /\$versionLabel\.Text = "V" \+ \$Script:Version/, "client panel version label must be V0.x.x only");
     assert.match(content, /\$button\.Left = 0[\s\S]*?\$button\.Top = 0[\s\S]*?\$button\.Width = 58[\s\S]*?\$button\.Height = 58/, "EA logo button must keep stable 58x58 blue container");
     assert.match(content, /\$versionLabel\.BackColor = \[System\.Drawing\.ColorTranslator\]::FromHtml\("#1677ff"\)/, "version label must stay inside the blue logo container visually");
@@ -891,6 +1146,7 @@ async function main() {
   runWecomGroupRegistryTests();
   await runApiPermissionTests();
   await runManualMessageApiTests();
+  await runClientManualMessageApiTests();
   console.log("Desktop tip production maintenance tests passed");
 }
 

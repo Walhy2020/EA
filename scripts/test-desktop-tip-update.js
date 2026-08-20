@@ -304,7 +304,7 @@ function runUpdaterTests() {
     "-MainScript", restartScript,
     "-ExpectedSha256", "0".repeat(64),
     "-ExpectedSize", String(fs.statSync(okZip).size),
-    "-ExpectedVersion", "0.3.4"
+    "-ExpectedVersion", "0.4.0"
   ], { encoding: "utf8" });
   assert.notEqual(badHash.status, 0, "hash mismatch must fail safely");
   assert.equal(fs.readFileSync(path.join(installDir, "desktop-tip-client.ps1"), "utf8"), before);
