@@ -168,10 +168,7 @@ function main() {
     size,
     minimumSupportedVersion: "0.3.0",
     releaseNotes: [
-      "通用消息底部“收到”按钮调整为水平居中",
-      "正文滚动条继续按需显示，短内容不显示，超出时显示",
-      "通用消息继续只保留“收到”，点击后提交已收到并关闭，不打开 URL",
-      "保留原有 config、data、logs 和 clientId"
+      "优化了消息提醒界面，使用更清晰方便。"
     ]
   };
   fs.writeFileSync(path.join(releaseDir, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

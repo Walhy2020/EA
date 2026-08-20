@@ -1,16 +1,13 @@
 {
   "version": "0.3.4",
-  "appVersion": "0.6.62",
-  "publishedAt": "2026-08-20T06:44:52.101Z",
+  "appVersion": "0.6.63",
+  "publishedAt": "2026-08-20T07:11:32.617Z",
   "packageUrl": "/api/desktop-tip/client-update/package",
   "packageFile": "EA桌面提醒_client_v0.3.4.zip",
-  "sha256": "6dd236c88030e9fc7e83da4acb4f1f51ed2490d22d2d7f1e837d80b3f3106571",
+  "sha256": "fb3bab7cff64e2612daddbf2a03ac4e72e5c9ca1b0b0ad0a5265aa5d9f21d3a3",
   "size": 44195,
   "minimumSupportedVersion": "0.3.0",
   "releaseNotes": [
-    "通用消息底部“收到”按钮调整为水平居中",
-    "正文滚动条继续按需显示，短内容不显示，超出时显示",
-    "通用消息继续只保留“收到”，点击后提交已收到并关闭，不打开 URL",
-    "保留原有 config、data、logs 和 clientId"
+    "优化了消息提醒界面，使用更清晰方便。"
   ]
 }
