@@ -11,7 +11,7 @@ const outDir = path.join(toolDir, "OutPackage");
 const releaseDir = path.join(toolDir, "releases");
 const version = process.argv.find((item) => item.startsWith("--version="))?.slice("--version=".length)
   || process.env.DESKTOP_TIP_CLIENT_VERSION
-  || "0.3.3";
+  || "0.3.4";
 
 const updateFiles = [
   { source: path.join(toolDir, "desktop-tip-client.ps1"), entry: "desktop-tip-client.ps1" },
@@ -168,8 +168,8 @@ function main() {
     size,
     minimumSupportedVersion: "0.3.0",
     releaseNotes: [
-      "通用消息正文滚动条改为原生按需显示，短内容不显示，超出时显示",
-      "正文继续与标题相同字号，保留自动换行和长正文滚动",
+      "通用消息底部“收到”按钮调整为水平居中",
+      "正文滚动条继续按需显示，短内容不显示，超出时显示",
       "通用消息继续只保留“收到”，点击后提交已收到并关闭，不打开 URL",
       "保留原有 config、data、logs 和 clientId"
     ]

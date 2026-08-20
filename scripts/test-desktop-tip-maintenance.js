@@ -636,7 +636,7 @@ async function main() {
   const psClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const psPackageClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), "utf8");
   for (const content of [psClient, psPackageClient]) {
-    assert.match(content, /\$Script:Version = "0\.3\.3"/, "client version must be v0.3.3");
+    assert.match(content, /\$Script:Version = "0\.3\.4"/, "client version must be v0.3.4");
     assert.match(content, /Maintenance-StatusText/, "client must include maintenance panel formatter");
     assert.match(content, /TextFromCodes @\(27491,24335,26381/, "client must avoid raw Chinese literals for old PowerShell parsing");
     assert.match(content, /clientVersion=\$version/, "client poll must report clientVersion for registry");
@@ -658,6 +658,10 @@ async function main() {
     assert.match(content, /\$titleLabel\.Font = New-Object System\.Drawing\.Font\("Microsoft YaHei UI", 12, \[System\.Drawing\.FontStyle\]::Bold\)/, "title font size must stay 12");
     assert.match(content, /\$bodyBox\.Font = New-Object System\.Drawing\.Font\("Microsoft YaHei UI", 12\)/, "generic body font size must match title size");
     assert.match(content, /\$bodyBox\.Top = 76[\s\S]*?\$bodyBox\.Height = 108[\s\S]*?\$openButton\.Top = 194/, "generic body layout must leave space before the button");
+    assert.match(content, /\$genericWindowWidth = 376/, "generic message window width must stay explicit for button centering");
+    assert.match(content, /\$genericActionCenter = \$bodyBox\.Left \+ \[int\]\(\$bodyBox\.Width \/ 2\)/, "generic action center must use body/action area center");
+    assert.match(content, /\$openButton\.Left = \[int\]\(\$genericActionCenter - \(\$openButton\.Width \/ 2\)\)/, "generic receive button center must align with action area center");
+    assert.match(content, /\$bodyBox\.Left = 18[\s\S]*?\$openButton\.Width = 78[\s\S]*?\$bodyBox\.Width = 340[\s\S]*?\$genericActionCenter = \$bodyBox\.Left \+ \[int\]\(\$bodyBox\.Width \/ 2\)[\s\S]*?\$openButton\.Left = \[int\]\(\$genericActionCenter - \(\$openButton\.Width \/ 2\)\)/, "generic receive button center point must align with the 188px body/window center");
     assert.match(content, /Body scroll self test failed/, "client selftest must cover short and long body scroll cases");
     assert.match(content, /\$shortSingle\.Height -gt 108 -or \$shortMulti\.Height -gt 108 -or \$longMulti\.Height -le 108/, "client selftest must verify short single-line, short multi-line, and long multi-line body overflow");
     assert.match(content, /TextFromCodes @\(25910,21040\)/, "generic message panel must use single 收到 button");

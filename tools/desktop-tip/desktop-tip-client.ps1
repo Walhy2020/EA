@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Script:Version = "0.3.3"
+$Script:Version = "0.3.4"
 $Script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:ConfigPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $Script:Root "config\desktop-tip-client.config.json" }
 $Script:LogDir = Join-Path $Script:Root "logs"
@@ -677,10 +677,12 @@ function Start-TipWindow {
       $bodyBox.Height = 108
       $titleLabel.Width = 286
       $openButton.Text = TextFromCodes @(25910,21040)
-      $openButton.Left = 250
+      $genericWindowWidth = 376
+      $genericActionCenter = $bodyBox.Left + [int]($bodyBox.Width / 2)
+      $openButton.Left = [int]($genericActionCenter - ($openButton.Width / 2))
       $openButton.Top = 194
       $dismissButton.Visible = $false
-      Move-ToBottomRight -Width 376 -Height 240
+      Move-ToBottomRight -Width $genericWindowWidth -Height 240
     }
     $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
     $form.Show()

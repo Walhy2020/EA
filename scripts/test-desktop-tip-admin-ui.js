@@ -88,14 +88,14 @@ function createHarness(fetchHandler) {
 function statusWithRegisteredClients(count) {
   return {
     ok: true,
-    app: { version: "0.6.61" },
+    app: { version: "0.6.62" },
     config: { server: { host: "127.0.0.1", port: 39200 } },
     modules: {
       rank: { files: {} },
       desktopTip: {
         version: "0.3.1",
         clientRegistry: { registeredClientCount: count },
-        clientUpdate: { packageReady: true, version: "0.3.3" },
+        clientUpdate: { packageReady: true, version: "0.3.4" },
         productionMaintenance: {
           registeredReceivers: { registeredClientCount: count }
         }
@@ -132,7 +132,7 @@ async function main() {
       role: "sender",
       accessMode: "all_signed_in",
       config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
-      clientUpdate: { packageReady: true, version: "0.3.3" }
+      clientUpdate: { packageReady: true, version: "0.3.4" }
     });
   `);
   assert.match(harness.element("desktopTipManualScopeInput").value, /2/, "config payload without count must not reset previous status count to zero");
@@ -158,7 +158,7 @@ async function main() {
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
         config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
-        clientUpdate: { packageReady: true, version: "0.3.3" }
+        clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }
     if (url === "/api/desktop-tip/maintenance/events?limit=30") {
@@ -201,7 +201,7 @@ async function main() {
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
         config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
-        clientUpdate: { packageReady: true, version: "0.3.3" }
+        clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }
     if (url === "/api/desktop-tip/maintenance/events?limit=30") {
@@ -220,7 +220,7 @@ async function main() {
       accessMode: "all_signed_in",
       registeredReceivers: { registeredClientCount: 2 },
       config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
-      clientUpdate: { packageReady: true, version: "0.3.3" }
+      clientUpdate: { packageReady: true, version: "0.3.4" }
     });
     $("desktopTipManualTitleInput").value = "EA桌面提醒测试";
     $("desktopTipManualBodyInput").value = "普通消息正文";
@@ -246,7 +246,7 @@ async function main() {
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
         config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
-        clientUpdate: { packageReady: true, version: "0.3.3" }
+        clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }
     if (url === "/api/desktop-tip/maintenance/events?limit=30") {
