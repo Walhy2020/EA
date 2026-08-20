@@ -1,0 +1,244 @@
+{
+  "enabled": true,
+  "version": "0.1.0",
+  "storage": {
+    "draftDir": "data/demand-workflow/drafts",
+    "participantTaskDir": "data/demand-workflow/participant-tasks",
+    "dailyTaskDir": "data/demand-workflow/daily-tasks",
+    "auditLogDir": "data/demand-workflow/audit-log"
+  },
+  "fieldNames": {
+    "demandId": "需求Id",
+    "title": "需求名称",
+    "content": "需求内容",
+    "project": "项目",
+    "demandType": "需求类型",
+    "scaleType": "规模类型",
+    "priority": "优先级",
+    "submitter": "提出人",
+    "progress": "需求进度",
+    "executionStatus": "执行状态",
+    "exception": "异常",
+    "updatedAt": "更新时间"
+  },
+  "demandCreation": {
+    "draftStatusFlow": [
+      "drafting",
+      "waiting_leaders",
+      "waiting_submitter_confirm",
+      "written",
+      "canceled"
+    ],
+    "submitterSource": "wecom_sender_name",
+    "submitterRequiredFields": [
+      "需求类型",
+      "项目",
+      "规模类型",
+      "优先级",
+      "需求名称",
+      "需求内容",
+      "需求设计交付日期",
+      "更新时间"
+    ],
+    "manualLeaderFields": [
+      "策划组长",
+      "UI组长",
+      "动效组长",
+      "前端组长",
+      "后端组长",
+      "测试组长"
+    ],
+    "leaderSupplementFields": {
+      "UI组长": [
+        "UI制作交付日期",
+        "UI监修完成日期"
+      ],
+      "动效组长": [
+        "动效制作交付日期",
+        "动效监修完成日期"
+      ],
+      "前端组长": [
+        "程序开发交付日期"
+      ],
+      "后端组长": [
+        "程序开发交付日期"
+      ],
+      "策划组长": [
+        "内网验收/测试完成日期",
+        "正式验收/测试完成日期"
+      ],
+      "测试组长": [
+        "内网验收/测试完成日期",
+        "正式验收/测试完成日期"
+      ]
+    },
+    "initialValues": {
+      "需求进度": "规划中",
+      "执行状态": "未启动",
+      "异常": "无",
+      "内网验收进度": "0%",
+      "内网测试进度": "0%",
+      "正式验收进度": "0%",
+      "正式测试进度": "0%"
+    },
+    "writeRequiresSubmitterConfirm": true
+  },
+  "stages": {
+    "sequence": [
+      "规划中",
+      "设计中",
+      "实现中",
+      "内网验收/测试中",
+      "正式验收/测试中",
+      "上线前整备",
+      "待上线",
+      "已上线"
+    ],
+    "dailyIncludedStages": [
+      "设计中",
+      "实现中",
+      "内网验收/测试中",
+      "正式验收/测试中",
+      "上线前整备"
+    ],
+    "onlineStages": [
+      "待上线",
+      "已上线"
+    ],
+    "assigneeFieldsByStage": {
+      "设计中": [
+        "策划人员"
+      ],
+      "实现中": [
+        "UI人员",
+        "动效人员",
+        "前端开发",
+        "后端开发"
+      ],
+      "内网验收/测试中": [
+        "策划人员",
+        "测试人员"
+      ],
+      "正式验收/测试中": [
+        "策划人员",
+        "测试人员"
+      ],
+      "上线前整备": [
+        "策划人员"
+      ],
+      "待上线": [
+        "策划人员"
+      ],
+      "已上线": [
+        "策划人员"
+      ]
+    }
+  },
+  "roles": {
+    "策划人员": {
+      "leaderField": "策划组长",
+      "leaderNames": [],
+      "memberNames": []
+    },
+    "UI人员": {
+      "leaderField": "UI组长",
+      "leaderNames": [],
+      "memberNames": []
+    },
+    "动效人员": {
+      "leaderField": "动效组长",
+      "leaderNames": [],
+      "memberNames": []
+    },
+    "前端开发": {
+      "leaderField": "前端组长",
+      "leaderNames": [],
+      "memberNames": []
+    },
+    "后端开发": {
+      "leaderField": "后端组长",
+      "leaderNames": [],
+      "memberNames": []
+    },
+    "测试人员": {
+      "leaderField": "测试组长",
+      "leaderNames": [],
+      "memberNames": []
+    }
+  },
+  "fieldRules": {
+    "focusFields": {},
+    "remainingWorkFields": {},
+    "progressFields": {},
+    "deadlineFields": {}
+  },
+  "dailyTaskSummary": {
+    "timezone": "Asia/Shanghai",
+    "snapshotBuildTime": "08:00",
+    "executorPushTimes": [
+      "09:00",
+      "18:40"
+    ],
+    "snapshotPolicy": "freeze_task_ids_and_order_refresh_status_only",
+    "onlyBuildOncePerDay": true,
+    "allowManualRebuild": false,
+    "manualRebuildRequiresConfirm": true,
+    "sortRules": [
+      {
+        "fieldType": "deadline",
+        "direction": "asc"
+      },
+      {
+        "field": "优先级",
+        "direction": "desc",
+        "order": [
+          "紧急",
+          "最高",
+          "高",
+          "P0",
+          "P1",
+          "中",
+          "P2",
+          "低",
+          "P3"
+        ]
+      }
+    ],
+    "todayMustDo": {
+      "enabled": true,
+      "capacityThreshold": 1,
+      "singleTaskAlwaysMustDo": true,
+      "accumulateRemainingWorkUntilThreshold": true
+    },
+    "refreshFieldsAfterSnapshot": [
+      "需求进度",
+      "执行状态",
+      "异常",
+      "更新时间"
+    ],
+    "lateAddedTaskPolicy": "notify_as_urgent_extra_do_not_change_snapshot"
+  },
+  "overdueRules": {
+    "statusLabels": {
+      "normal": "正常",
+      "urgent": "紧迫",
+      "overdue": "逾期"
+    },
+    "urgentWhenRemainingWorkGreaterThanDaysUntilDeadline": true,
+    "overdueWhenTodayAfterDeadline": true,
+    "writeExceptionTagWhenOverdue": "逾期",
+    "clearExceptionTagWhenBackToNormalOrUrgent": true
+  },
+  "logging": {
+    "events": [
+      "draft_created",
+      "leader_task_sent",
+      "leader_submitted",
+      "submitter_confirmed",
+      "demand_written",
+      "daily_snapshot_created",
+      "daily_task_status_refreshed",
+      "daily_push_sent"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": "0.3.3",
+  "appVersion": "0.6.61",
+  "publishedAt": "2026-08-20T04:01:13.934Z",
+  "packageUrl": "/api/desktop-tip/client-update/package",
+  "packageFile": "EA桌面提醒_client_v0.3.3.zip",
+  "sha256": "ca49d0ee0b1b88912e6ba821f9b9663711b84d3739314f68d4899508b7b76c1d",
+  "size": 44116,
+  "minimumSupportedVersion": "0.3.0",
+  "releaseNotes": [
+    "通用消息正文滚动条改为原生按需显示，短内容不显示，超出时显示",
+    "正文继续与标题相同字号，保留自动换行和长正文滚动",
+    "通用消息继续只保留“收到”，点击后提交已收到并关闭，不打开 URL",
+    "保留原有 config、data、logs 和 clientId"
+  ]
+}

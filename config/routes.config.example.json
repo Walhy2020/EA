@@ -1,0 +1,33 @@
+{
+  "rules": [
+    {
+      "intent": "rank.query",
+      "module": "rank",
+      "keywords": ["top20", "榜单", "排名", "小游戏", "畅销榜", "关注游戏", "历史"]
+    },
+    {
+      "intent": "demandCollaboration.open_entry",
+      "module": "demandCollaboration",
+      "keywords": ["需求协作", "需求待办", "需求H5", "需求h5", "需求入口"]
+    },
+    {
+      "intent": "devProgress.query",
+      "module": "devProgress",
+      "keywords": ["任务", "开发进度", "负责人", "名下", "手上", "版本", "本月", "上月", "本周"]
+    },
+    {
+      "intent": "demand.query",
+      "module": "demand",
+      "keywords": ["需求", "进度", "延期", "排期"]
+    },
+    {
+      "intent": "activity.query",
+      "module": "activity",
+      "keywords": ["活动", "情报", "投放", "素材"]
+    }
+  ],
+  "fallback": {
+    "useAiWhenEnabled": true,
+    "defaultModule": "rank"
+  }
+}

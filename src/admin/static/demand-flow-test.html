@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>需求协作流程测试</title>
+  <link rel="stylesheet" href="./demand-flow-test.css?v=0.1.2">
+</head>
+<body>
+  <main class="test-shell">
+    <header class="test-header">
+      <div>
+        <h1>需求协作流程测试</h1>
+        <p>同屏模拟提出人和组长身份，观察草稿、待办和补充状态流转。</p>
+      </div>
+      <span class="version-badge">v0.1.2</span>
+    </header>
+
+    <section class="test-toolbar" aria-label="测试操作">
+      <button id="refreshAllButton" class="primary-action" type="button">刷新全部</button>
+      <a href="./demand-h5.html?userName=%E6%9D%8E%E6%99%B6%E6%99%B6" target="_blank" rel="noreferrer">单页打开提出人</a>
+    </section>
+
+    <section id="paneGrid" class="pane-grid" aria-label="多身份页面">
+      <article class="pane" data-person="李晶晶" data-role="提出人" data-panel="draft">
+        <header>
+          <strong>提出人</strong>
+          <span>李晶晶</span>
+        </header>
+        <iframe title="提出人 李晶晶"></iframe>
+      </article>
+
+      <article class="pane" data-person="王谦" data-role="UI组长" data-panel="todo">
+        <header>
+          <strong>UI组长</strong>
+          <span>王谦</span>
+        </header>
+        <iframe title="UI组长 王谦"></iframe>
+      </article>
+
+      <article class="pane" data-person="时振兴" data-role="策划组长" data-panel="todo">
+        <header>
+          <strong>策划组长</strong>
+          <span>时振兴</span>
+        </header>
+        <iframe title="策划组长 时振兴"></iframe>
+      </article>
+
+      <article class="pane" data-person="刘晓明" data-role="动效组长" data-panel="todo">
+        <header>
+          <strong>动效组长</strong>
+          <span>刘晓明</span>
+        </header>
+        <iframe title="动效组长 刘晓明"></iframe>
+      </article>
+
+      <article class="pane" data-person="胡锦南" data-role="前端组长" data-panel="todo">
+        <header>
+          <strong>前端组长</strong>
+          <span>胡锦南</span>
+        </header>
+        <iframe title="前端组长 胡锦南"></iframe>
+      </article>
+
+      <article class="pane" data-person="王文静" data-role="后端组长" data-panel="todo">
+        <header>
+          <strong>后端组长</strong>
+          <span>王文静</span>
+        </header>
+        <iframe title="后端组长 王文静"></iframe>
+      </article>
+
+      <article class="pane" data-person="高文盛" data-role="测试组长" data-panel="todo">
+        <header>
+          <strong>测试组长</strong>
+          <span>高文盛</span>
+        </header>
+        <iframe title="测试组长 高文盛"></iframe>
+      </article>
+    </section>
+  </main>
+
+  <script src="./demand-flow-test.js?v=0.1.1"></script>
+</body>
+</html>

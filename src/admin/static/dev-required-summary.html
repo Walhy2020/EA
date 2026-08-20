@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f3f7f8">
+  <title>需求进度管理 - 必填字段详情</title>
+  <link rel="stylesheet" href="./watchdog-feedback.css?v=0.2.0">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="page-header">
+      <p class="eyebrow">需求进度管理</p>
+      <div class="header-line">
+        <h1>必填字段详情</h1>
+        <span id="statusBadge" class="status-badge">加载中</span>
+      </div>
+    </header>
+
+    <section id="loadingPanel" class="notice-panel" aria-live="polite">正在读取需求任务...</section>
+    <section id="errorPanel" class="notice-panel error" hidden aria-live="polite"></section>
+    <section id="emptyPanel" class="notice-panel" hidden aria-live="polite">当前没有需要展示的需求任务。</section>
+
+    <section id="taskPanel" class="task-panel" hidden>
+      <h2 id="demandName"></h2>
+      <dl class="task-details">
+        <div>
+          <dt>提醒 ID</dt>
+          <dd id="reminderId" class="task-id-value"></dd>
+        </div>
+        <div>
+          <dt>责任同事</dt>
+          <dd id="ownerName"></dd>
+        </div>
+        <div>
+          <dt>所属项目</dt>
+          <dd id="projectName"></dd>
+        </div>
+        <div>
+          <dt>需求 ID</dt>
+          <dd id="demandId" class="task-id-value"></dd>
+        </div>
+        <div class="detail-wide">
+          <dt>缺失字段</dt>
+          <dd id="missingFields"></dd>
+        </div>
+      </dl>
+
+      <section class="last-feedback" aria-label="最近处理情况">
+        <p class="section-label">最近处理情况</p>
+        <p id="latestAction"></p>
+      </section>
+
+      <p class="action-message">群内页面仅展示任务详情。请由责任同事在“需求进度管理”个人消息中处理。</p>
+    </section>
+
+    <footer>需求进度管理 · 必填字段详情 v0.2.0</footer>
+  </main>
+  <script src="./dev-required-summary.js?v=0.2.0"></script>
+</body>
+</html>

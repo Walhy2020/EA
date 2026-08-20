@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>需求协作入口预览</title>
+  <link rel="stylesheet" href="./demand-workbench.css">
+</head>
+<body>
+  <main class="workbench-shell">
+    <header class="workbench-header">
+      <div>
+        <p>企业微信工作台入口预览</p>
+        <h1>工作台</h1>
+      </div>
+      <span>入口原型 v0.1.1</span>
+    </header>
+
+    <section class="search-bar" aria-label="搜索">
+      <span>搜索应用、任务、需求</span>
+    </section>
+
+    <section class="notice-band">
+      <div>
+        <strong>需求协作</strong>
+        <p>处理待办、查看提醒、补充需求都从这里进入。</p>
+      </div>
+      <a data-demand-h5-link href="./demand-h5.html">打开</a>
+    </section>
+
+    <section class="app-section" aria-label="常用应用">
+      <div class="section-title">
+        <h2>常用应用</h2>
+        <button type="button" id="editBtn">管理</button>
+      </div>
+
+      <div class="app-grid">
+        <a class="app-tile primary" data-demand-h5-link href="./demand-h5.html" aria-label="打开需求协作">
+          <span class="app-icon">需</span>
+          <strong>需求协作</strong>
+          <em>3</em>
+        </a>
+
+        <button class="app-tile" type="button">
+          <span class="app-icon muted">报</span>
+          <strong>日报</strong>
+        </button>
+
+        <button class="app-tile" type="button">
+          <span class="app-icon green">审</span>
+          <strong>审批</strong>
+        </button>
+
+        <button class="app-tile" type="button">
+          <span class="app-icon amber">文</span>
+          <strong>文档</strong>
+        </button>
+      </div>
+    </section>
+
+    <section class="task-preview">
+      <div class="section-title">
+        <h2>需求待办预览</h2>
+        <a data-demand-h5-link data-demand-panel="todo" href="./demand-h5.html#todo">全部</a>
+      </div>
+
+      <article>
+        <div>
+          <strong>今日必做 3 项</strong>
+          <p>高校活动入口倒计时、UI 日期确认、程序交付补充</p>
+        </div>
+        <a data-demand-h5-link data-demand-panel="todo" href="./demand-h5.html#todo">查看</a>
+      </article>
+
+      <article>
+        <div>
+          <strong>待确认草稿 2 项</strong>
+          <p>全部组长补充完成后，提出人最终确认再写入总表</p>
+        </div>
+        <a data-demand-h5-link data-demand-panel="draft" href="./demand-h5.html#draft">查看</a>
+      </article>
+    </section>
+
+    <nav class="bottom-nav" aria-label="企业微信底部导航预览">
+      <span>消息</span>
+      <span>通讯录</span>
+      <strong>工作台</strong>
+      <span>我</span>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+  <script src="./demand-entry-context.js?v=0.1.60"></script>
+  <script src="./demand-workbench.js?v=0.1.60"></script>
+</body>
+</html>

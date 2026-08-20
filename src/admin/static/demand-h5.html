@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>需求协作</title>
+  <link rel="stylesheet" href="./demand-h5.css?v=0.2.9">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p>EA 系统</p>
+        <h1>需求进度管理</h1>
+      </div>
+      <div class="session-user">
+        <span id="sessionUserName">身份读取中</span>
+        <button id="logoutButton" class="logout-button" type="button">退出</button>
+      </div>
+    </header>
+
+    <section class="context-bar">
+      <div class="project-switcher" aria-label="项目选择">
+        <label class="project-select-wrap">
+          <select id="projectSelect" aria-label="项目">
+            <option selected>恶魔高校</option>
+            <option>一骑当千</option>
+            <option>女王之刃</option>
+            <option value="嗜血">噬血狂袭</option>
+            <option>魔王</option>
+          </select>
+        </label>
+      </div>
+      <div class="context-status">
+        <div id="dataStatus" class="data-status">数据更新时间：读取中</div>
+        <div id="entryStatus" class="data-status" hidden></div>
+      </div>
+    </section>
+
+    <nav class="tabs" aria-label="页面切换">
+      <button class="tab-button active" type="button" data-panel="todo">我的待办 <span id="todoCountOutput" class="tab-count">0</span></button>
+      <button id="memberTodoTabButton" class="tab-button" type="button" data-panel="memberTodo" hidden>组员待办 <span id="memberTodoCountOutput" class="tab-count">0</span></button>
+      <button class="tab-button" type="button" data-panel="today">今日必做 <span id="todayCountOutput" class="tab-count">0</span></button>
+      <button id="createDemandTabButton" class="tab-button" type="button" data-panel="create" hidden>创建需求</button>
+      <button id="draftTabButton" class="tab-button tab-button-with-sort" type="button" data-panel="draft" aria-label="字段待补充，按创建时间排序：当前越早创建越靠上，点击切换为越晚创建越靠上" title="当前越早创建越靠上，点击切换为越晚创建越靠上">
+        <span class="tab-title-count"><span class="tab-label">字段待补充</span><span id="draftCountOutput" class="tab-count">0</span></span><span class="created-time-sort" aria-hidden="true"><i></i><i></i><i></i></span>
+      </button>
+      <button id="fallbackTabButton" class="tab-button tab-button-with-sort" type="button" data-panel="fallback" hidden aria-label="兜底需求，按创建时间排序：当前越早创建越靠上，点击切换为越晚创建越靠上" title="当前越早创建越靠上，点击切换为越晚创建越靠上">
+        <span class="tab-title-count"><span class="tab-label">兜底需求</span><span id="fallbackCountOutput" class="tab-count">0</span></span><span class="created-time-sort" aria-hidden="true"><i></i><i></i><i></i></span>
+      </button>
+    </nav>
+
+    <section id="panel-create" class="panel" hidden>
+      <form id="demandForm" class="form-stack">
+        <input id="projectInput" type="hidden" value="恶魔高校">
+        <input id="submitterInput" type="hidden" value="">
+
+        <label>
+          <span>需求名称</span>
+          <input id="nameInput" type="text" placeholder="例如：高校活动入口增加倒计时" required>
+        </label>
+
+        <div class="meta-row">
+          <label>
+            <span>需求类型</span>
+            <select id="typeInput" required>
+              <option selected>新功能</option>
+              <option>新活动</option>
+              <option>优化</option>
+              <option>bug</option>
+            </select>
+          </label>
+
+          <label>
+            <span>规模类型</span>
+            <select id="scaleTypeInput" required>
+              <option>小</option>
+              <option selected>中</option>
+              <option>大</option>
+              <option>超大</option>
+            </select>
+          </label>
+
+          <label>
+            <span>优先级</span>
+            <select id="priorityInput" required>
+              <option>最高</option>
+              <option selected>重点</option>
+              <option>高</option>
+              <option>中</option>
+            </select>
+          </label>
+        </div>
+
+        <label>
+          <span>需求内容</span>
+          <textarea id="contentInput" rows="5" placeholder="描述目标、规则、展示位置、验收标准" required></textarea>
+        </label>
+
+        <label>
+          <span>链接地址</span>
+          <input id="linkInput" type="url" placeholder="粘贴需求文档、截图或录屏链接">
+        </label>
+
+        <fieldset class="leader-fields" aria-label="通知组长">
+          <div class="leader-grid">
+            <button class="leader-option" type="button" data-leader-field="策划组长" data-leader-names="时振兴" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>时振兴</strong>
+                <em>策划组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+            <button class="leader-option" type="button" data-leader-field="UI组长" data-leader-names="王谦" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>王谦</strong>
+                <em>UI组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+            <button class="leader-option" type="button" data-leader-field="动效组长" data-leader-names="刘晓明" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>刘晓明</strong>
+                <em>动效组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+            <button class="leader-option" type="button" data-leader-field="前端组长" data-leader-names="胡锦南、赵琛" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>胡锦南、赵琛</strong>
+                <em>前端组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+            <button class="leader-option" type="button" data-leader-field="后端组长" data-leader-names="王文静" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>王文静</strong>
+                <em>后端组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+            <button class="leader-option" type="button" data-leader-field="测试组长" data-leader-names="高文盛" aria-pressed="true">
+              <span class="leader-option-text">
+                <strong>高文盛</strong>
+                <em>测试组长</em>
+              </span>
+              <span class="leader-check" aria-hidden="true">√</span>
+            </button>
+          </div>
+        </fieldset>
+
+        <div class="date-row">
+          <label>
+            <span>需求设计交付日期</span>
+            <input id="designDeliveryDateInput" type="date" required>
+          </label>
+
+          <label>
+            <span>更新时间</span>
+            <input id="updatedAtInput" type="date" required>
+          </label>
+        </div>
+
+        <button class="primary-button" type="submit">生成需求草稿</button>
+      </form>
+    </section>
+
+    <section id="panel-todo" class="panel active">
+      <div id="todoEmpty" class="empty-state">暂无待办任务</div>
+      <div id="todoList" class="draft-list" hidden></div>
+      <div id="todoLoading" class="list-loading" hidden>正在加载...</div>
+    </section>
+
+    <section id="panel-memberTodo" class="panel">
+      <div id="memberTodoSummary" class="member-todo-summary" hidden></div>
+      <div id="memberTodoEmpty" class="empty-state">暂无组员待办</div>
+      <div id="memberTodoList" class="draft-list" hidden></div>
+      <div id="memberTodoLoading" class="list-loading" hidden>正在加载...</div>
+    </section>
+
+    <section id="panel-today" class="panel">
+      <div class="empty-state">暂无今日必做任务</div>
+    </section>
+
+    <section id="panel-draft" class="panel">
+      <div id="draftEmpty" class="empty-state">暂无字段待补充</div>
+      <div id="draftList" class="draft-list" hidden></div>
+      <div id="draftLoading" class="list-loading" hidden>正在加载...</div>
+
+      <div id="draftContent" class="draft-content" hidden>
+        <div class="draft-head">
+          <div>
+            <p id="draftIdOutput" class="eyebrow">草稿 临时-001</p>
+            <h2 id="draftNameOutput"></h2>
+          </div>
+          <span id="draftStatusOutput" class="state-pill">等待确认</span>
+        </div>
+
+        <div id="draftRoleNotice" class="role-notice" hidden></div>
+
+        <div class="timeline">
+          <div class="timeline-item active">
+            <strong>草稿已生成</strong>
+            <span>等待继续补充</span>
+          </div>
+          <div class="timeline-item">
+            <strong>组长补充</strong>
+            <span>暂未流转</span>
+          </div>
+          <div class="timeline-item">
+            <strong>提出人最终确认</strong>
+            <span>暂未流转</span>
+          </div>
+          <div class="timeline-item">
+            <strong>写入需求总表</strong>
+            <span>暂未流转</span>
+          </div>
+        </div>
+
+        <section class="field-review">
+          <h3>已收集字段</h3>
+          <dl>
+            <div><dt>项目</dt><dd id="draftProjectOutput"></dd></div>
+            <div><dt>类型</dt><dd id="draftTypeOutput"></dd></div>
+            <div><dt>规模类型</dt><dd id="draftScaleTypeOutput"></dd></div>
+            <div><dt>优先级</dt><dd id="draftPriorityOutput"></dd></div>
+            <div><dt>需求设计交付日期</dt><dd id="draftDesignDeliveryDateOutput"></dd></div>
+            <div><dt>更新时间</dt><dd id="draftUpdatedAtOutput"></dd></div>
+            <div><dt>各组长</dt><dd id="draftLeadsOutput"></dd></div>
+            <div><dt>需求内容</dt><dd id="draftDemandContentOutput"></dd></div>
+            <div><dt>链接地址</dt><dd id="draftLinkOutput"></dd></div>
+          </dl>
+        </section>
+
+        <section id="leaderSupplementSection" class="leader-supplement" hidden>
+          <h3 id="leaderSupplementTitle">组长补充字段</h3>
+          <div id="leaderSupplementFields" class="leader-supplement-fields"></div>
+        </section>
+
+        <div class="bottom-actions">
+          <button id="draftSecondaryAction" class="ghost-button" type="button">撤回修改</button>
+          <button id="draftPrimaryAction" class="primary-button" type="button">提醒未处理人</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-fallback" class="panel">
+      <section id="fallbackLeaderFilter" class="fallback-leader-filter" hidden>
+        <div id="fallbackLeaderFilterOptions" class="fallback-filter-options" aria-label="按组长筛选">
+          <button id="fallbackLeaderFilterClear" class="fallback-filter-clear" type="button" hidden>Clear</button>
+        </div>
+      </section>
+      <div id="fallbackEmpty" class="empty-state">暂无兜底需求</div>
+      <div id="fallbackList" class="draft-list" hidden></div>
+      <div id="fallbackLoading" class="list-loading" hidden>正在加载...</div>
+    </section>
+
+    <div class="build-version">v0.2.9</div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <script src="./demand-entry-context.js?v=0.2.9"></script>
+  <script src="./demand-fallback-leader-filter.js?v=0.2.9"></script>
+  <script src="./demand-locator-navigation.js?v=0.2.2"></script>
+  <script src="./demand-task-time-sort.js?v=0.2.9"></script>
+  <script src="./demand-h5.js?v=0.2.9"></script>
+</body>
+</html>

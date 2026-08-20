@@ -1,0 +1,24 @@
+{
+  "name": "eazygame-integrated-assistant",
+  "version": "0.6.61",
+  "private": true,
+  "description": "Unified WeCom smart robot entry and local admin console for EazyGame operations.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "check": "node scripts/check-syntax.js",
+    "check:config": "node src/main.js --check-config",
+    "test:wecom-app-callback": "node scripts/test-wecom-app-callback.js",
+    "test:watchdog-pending-command-priority": "node scripts/test-watchdog-pending-command-priority.js",
+    "test:desktop-tip-maintenance": "node scripts/test-desktop-tip-maintenance.js",
+    "test:desktop-tip-update": "node scripts/test-desktop-tip-update.js",
+    "test:desktop-tip-admin-ui": "node scripts/test-desktop-tip-admin-ui.js",
+    "build:desktop-tip-release": "node scripts/build-desktop-tip-release.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@wecom/aibot-node-sdk": "^1.0.7"
+  }
+}

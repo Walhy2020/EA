@@ -1,0 +1,11 @@
+{
+  "version": "0.3.3",
+  "serverBaseUrl": "https://com.veryeazy.com:39200",
+  "userId": "",
+  "clientToken": "",
+  "pollSeconds": 8,
+  "floatingButtonText": "EA",
+  "openUrl": "https://work.weixin.qq.com",
+  "updateEnabled": true,
+  "updateCheckMinutes": 30
+}

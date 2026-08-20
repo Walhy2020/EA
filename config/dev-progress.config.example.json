@@ -1,0 +1,135 @@
+{
+  "enabled": false,
+  "name": "开发进度监控",
+  "source": "wecom-smartsheet",
+  "docUrl": "",
+  "docid": "",
+  "sheetId": "",
+  "viewId": "",
+  "keyType": "CELL_VALUE_KEY_TYPE_FIELD_TITLE",
+  "limit": 100,
+  "cacheMinutes": 5,
+  "auth": {
+    "corpIdEnv": "WECOM_DOC_CORP_ID",
+    "agentIdEnv": "WECOM_DOC_AGENT_ID",
+    "secretEnv": "WECOM_DOC_SECRET"
+  },
+  "fieldMapping": {
+    "demandId": "",
+    "project": "",
+    "demand": "",
+    "demandContent": "",
+    "demandType": "",
+    "owner": "",
+    "status": "",
+    "progress": "",
+    "planDate": "",
+    "blockers": "",
+    "updatedAt": "",
+    "remarks": "",
+    "frontendOwner": "",
+    "backendOwner": "",
+    "frontendRemaining": "",
+    "backendRemaining": "",
+    "uiOwner": "",
+    "plannerOwner": "",
+    "testerOwner": "",
+    "effectOwner": "",
+    "plannerLead": "",
+    "uiLead": "",
+    "effectLead": "",
+    "frontendLead": "",
+    "backendLead": "",
+    "testerLead": "",
+    "devDeadline": "",
+    "testDeadline": "",
+    "acceptanceDeadline": "",
+    "releaseDate": "",
+    "groupChat": "",
+    "demandLink": ""
+  },
+  "personAliases": {},
+  "rules": {
+    "scanLimit": 2000,
+    "scanStartDate": "",
+    "excludedProjects": [],
+    "completedStatusKeywords": [
+      "完成",
+      "已上线",
+      "已验收",
+      "结束"
+    ],
+    "onlineStatusKeywords": [
+      "已上线",
+      "上线完成"
+    ],
+    "ignoredStatusKeywords": [
+      "取消",
+      "暂停",
+      "暂缓",
+      "废弃",
+      "不做"
+    ],
+    "overdue": {
+      "enabled": true
+    },
+    "stale": {
+      "enabled": false,
+      "days": 3
+    },
+    "remainingNearDeadline": {
+      "enabled": true,
+      "days": 2,
+      "minimum": 0
+    },
+    "missingOwner": {
+      "enabled": false,
+      "requiredRoles": [
+        "planner"
+      ]
+    },
+    "requiredFields": {
+      "enabled": false,
+      "cumulative": true,
+      "items": []
+    }
+  },
+  "monitor": {
+    "enabled": true,
+    "mode": "poll-wecom-smartsheet",
+    "intervalMinutes": 1,
+    "notifyThroughCenter": true,
+    "changeDetection": {
+      "enabled": true,
+      "quietMinutes": 3,
+      "minScanIntervalMinutes": 5,
+      "scanOnFirstRun": false,
+      "scanOnSignalError": true
+    },
+    "requiredFieldsPush": {
+      "enabled": false,
+      "cooldownMinutes": 1440,
+      "scanLimit": 2000,
+      "maxTargetsPerTick": 20,
+      "runOnStart": false,
+      "testMode": false,
+      "testTargetName": "",
+      "testVerifyDelaySeconds": 30,
+      "testNextTaskDelaySeconds": 600,
+      "groupCard": {
+        "enabled": false,
+        "maxCardsPerTick": 1,
+        "remindMinutes": 1440
+      },
+      "pilot": {
+        "enabled": false,
+        "targetName": "",
+        "remindMinutes": 1440,
+        "summaryMinutes": 1440,
+        "mentionDelaySeconds": 70,
+        "maxActiveTasks": 1,
+        "focusDemandIds": []
+      }
+    }
+  }
+}

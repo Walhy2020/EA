@@ -1,0 +1,62 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 39200,
+    "https": {
+      "enabled": false,
+      "certPath": "data/private/certs/com.veryeazy.com.pem",
+      "keyPath": "data/private/certs/com.veryeazy.com.key",
+      "healthHost": "127.0.0.1",
+      "healthPort": 39201
+    }
+  },
+  "runtime": {
+    "name": "Win10 company host",
+    "logLevel": "info"
+  },
+  "robot": {
+    "enabled": false,
+    "provider": "wecom-smart-bot",
+    "botIdEnv": "WECOM_SMART_BOT_ID",
+    "secretEnv": "WECOM_SMART_BOT_SECRET",
+    "welcomeText": "EazyGame Assistant 已在线。可以发送 top20、榜单、历史 游戏名、关注列表。",
+    "feedbackCard": {
+      "mode": "private_only",
+      "cooldownMinutes": 10
+    },
+    "outboundTest": {
+      "targetType": "user",
+      "targetId": "",
+      "message": "EA系统主动推送测试。"
+    }
+  },
+  "ai": {
+    "enabled": false,
+    "provider": "deepseek",
+    "providers": {
+      "deepseek": {
+        "label": "DeepSeek",
+        "baseUrl": "https://api.deepseek.com",
+        "model": "deepseek-v4-flash",
+        "apiKeyEnv": "DEEPSEEK_API_KEY"
+      },
+      "openai-compatible": {
+        "label": "OpenAI 兼容",
+        "baseUrl": "https://api.openai.com",
+        "model": "gpt-4o-mini",
+        "apiKeyEnv": "OPENAI_API_KEY"
+      },
+      "custom-compatible": {
+        "label": "自定义兼容接口",
+        "baseUrl": "",
+        "model": "",
+        "apiKeyEnv": "LLM_CUSTOM_API_KEY"
+      }
+    }
+  },
+  "security": {
+    "maskSecretsInLogs": true,
+    "logRequestText": false,
+    "showSecretsInAdmin": true
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "modules": {
+    "rank": {
+      "enabled": true,
+      "name": "小游戏榜单监控模块",
+      "type": "external-node-module",
+      "pathEnv": "",
+      "path": "src/modules/rank/embedded-wx-mini-rank-monitor",
+      "configPath": "config/rank.config.json",
+      "statePath": "data/rank/state.json",
+      "historyPath": "data/rank/history/rank_history.csv"
+    },
+    "demand": {
+      "enabled": false,
+      "name": "需求进度模块"
+    },
+    "demandCollaboration": {
+      "enabled": true,
+      "name": "需求协作入口",
+      "displayName": "需求协作",
+      "entryUrl": "",
+      "entryPath": "/demand-h5.html",
+      "oauthRedirectOrigin": "",
+      "internalHttpOAuth": {
+        "enabled": false,
+        "allowedOrigin": ""
+      },
+      "testFallbackUserName": "",
+      "version": "0.1.0",
+      "draftStore": {
+        "path": "data/demand-collaboration/drafts.json",
+        "expireDays": 30,
+        "maxExpiredDrafts": 500
+      }
+    },
+    "devProgress": {
+      "enabled": false,
+      "name": "开发进度监控",
+      "source": "wecom-smartsheet",
+      "configPath": "config/dev-progress.config.json"
+    },
+    "bugCollection": {
+      "enabled": false,
+      "name": "需求和 Bug 收集",
+      "source": "wecom-smartsheet",
+      "docUrl": "",
+      "docid": "",
+      "docLinkId": "",
+      "sheetId": "",
+      "viewId": "",
+      "keyType": "CELL_VALUE_KEY_TYPE_FIELD_TITLE",
+      "createDoc": {
+        "docName": "EA需求和Bug收集",
+        "spaceId": "",
+        "fatherId": "",
+        "adminUsers": [],
+        "shareAfterCreate": true
+      },
+      "auth": {
+        "corpIdEnv": "WECOM_DOC_CORP_ID",
+        "agentIdEnv": "WECOM_DOC_AGENT_ID",
+        "secretEnv": "WECOM_DOC_SECRET"
+      },
+      "fieldMapping": {
+        "taskId": "任务ID",
+        "issueType": "类型",
+        "title": "标题",
+        "description": "描述",
+        "screenshot": "截图",
+        "submitter": "提交人",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "status": "状态"
+      }
+    },
+    "docCreator": {
+      "enabled": true,
+      "name": "企业微信表格创建",
+      "source": "wecom-wedoc",
+      "auth": {
+        "corpIdEnv": "WECOM_DOC_CORP_ID",
+        "agentIdEnv": "WECOM_DOC_AGENT_ID",
+        "secretEnv": "WECOM_DOC_SECRET"
+      },
+      "createDoc": {
+        "documentNamePrefix": "EA文档",
+        "smartDocumentNamePrefix": "EA智能文档",
+        "docNamePrefix": "EA智能表格",
+        "spreadsheetNamePrefix": "EA表格",
+        "docTypes": {
+          "document": 3,
+          "smartdoc": 3,
+          "spreadsheet": 4,
+          "smartsheet": 10
+        },
+        "spaceId": "",
+        "fatherId": "",
+        "adminUsers": [],
+        "shareAfterCreate": true
+      }
+    },
+    "watchdog": {
+      "enabled": true,
+      "name": "盯梢系统",
+      "source": "wecom-smart-bot",
+      "defaultIntervalMinutes": 180,
+      "personAliases": {},
+      "auth": {
+        "corpIdEnv": "WECOM_DOC_CORP_ID",
+        "secretEnv": "WECOM_DOC_SECRET"
+      },
+      "appPush": {
+        "enabled": false,
+        "deliveryMode": "app_only",
+        "failureBackoffMs": 300000,
+        "feedbackPath": "/watchdog-feedback.html",
+        "corpIdEnv": "WECOM_DOC_CORP_ID",
+        "agentIdEnv": "WECOM_DOC_AGENT_ID",
+        "secretEnv": "WECOM_DOC_SECRET",
+        "testTargetUserId": "",
+        "nativeCard": {
+          "enabled": false,
+          "callbackPath": "/api/wecom/watchdog-callback",
+          "callbackTokenEnv": "WECOM_APP_CALLBACK_TOKEN",
+          "callbackAesKeyEnv": "WECOM_APP_CALLBACK_AES_KEY"
+        }
+      },
+      "sendQueue": {
+        "enabled": true,
+          "minIntervalMs": 65000,
+          "frequencyLimitBackoffMs": 1800000,
+          "frequencyLimitMaxBackoffMs": 28800000,
+          "failureBackoffMs": 120000,
+        "maxSendsPerTick": 1,
+        "batchSameTargetEnabled": true,
+        "batchSummaryMinTasks": 2,
+        "batchSummaryCooldownMs": 1800000
+      }
+    },
+    "desktopTip": {
+      "enabled": true,
+      "name": "EA 桌面提醒",
+      "source": "desktop-tip",
+      "version": "0.3.1",
+      "storePath": "data/desktop-tip/events.json",
+      "ttlMinutes": 4320,
+      "maxStoredEvents": 500,
+      "pollLimit": 20,
+      "tokenEnv": "EA_DESKTOP_TIP_TOKEN",
+      "requireToken": false,
+      "clientPollSeconds": 8,
+      "openUrl": "https://work.weixin.qq.com",
+      "clientRegistry": {
+        "storePath": "data/desktop-tip/clients.json",
+        "persistIntervalSeconds": 60,
+        "maxRegisteredClients": 5000
+      },
+      "clientUpdate": {
+        "enabled": true,
+        "manifestPath": "tools/desktop-tip/releases/latest.json",
+        "packageDir": "tools/desktop-tip/releases",
+        "packageUrl": "/api/desktop-tip/client-update/package"
+      },
+      "productionMaintenance": {
+        "enabled": true,
+        "name": "正式服停服更新通知",
+        "version": "0.3.0",
+        "storePath": "data/desktop-tip/production-maintenance.json",
+        "openUrl": "https://work.weixin.qq.com",
+        "messageAdmins": [],
+        "authorizedSenders": [],
+        "sendPermissionMode": "all_signed_in",
+        "recipientUsers": [],
+        "recipientGroups": {},
+        "defaultRecipientGroupId": "",
+        "defaultRecipientScope": "all_registered_clients",
+        "countdownMinutes": [30, 10, 5, 1],
+        "maxExtensionMinutes": 240,
+        "eventTtlMinutes": 4320,
+        "schedulerIntervalSeconds": 15,
+        "deliveryChannels": ["desktop_tip"],
+        "allowConfigBootstrap": false
+      }
+    },
+    "activity": {
+      "enabled": false,
+      "name": "活动情报模块"
+    },
+    "history": {
+      "enabled": false,
+      "name": "跨模块历史查询"
+    }
+  },
+  "monitors": {
+    "rank": {
+      "enabled": false,
+      "mode": "bridge-existing-module",
+      "intervalMinutes": 60,
+      "notifyThroughCenter": false
+    }
+  },
+  "notification": {
+    "enabled": false,
+    "defaultTarget": "group",
+    "groupWebhookEnv": "WECOM_GROUP_WEBHOOK_URL",
+    "appMessage": {
+      "corpIdEnv": "WECOM_APP_CORP_ID",
+      "agentIdEnv": "WECOM_APP_AGENT_ID",
+      "secretEnv": "WECOM_APP_SECRET",
+      "toUserEnv": "WECOM_APP_TO_USER"
+    }
+  }
+}

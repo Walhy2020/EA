@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EazyGame Assistant（EA系统）</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>EazyGame Assistant（EA系统）</h1>
+      <p id="subtitle">Win10 本地后台管理台 <span id="versionBadge">v-</span></p>
+    </div>
+    <div class="top-actions">
+      <button id="settingsBtn" class="icon-button" title="打开配置" aria-label="打开配置">⚙</button>
+      <button id="refreshBtn" class="icon-button" title="刷新状态" aria-label="刷新状态">↻</button>
+    </div>
+  </header>
+
+  <main id="dashboardView" class="layout">
+    <section class="panel">
+      <div class="panel-header">
+        <h2>运行状态</h2>
+        <span id="healthBadge" class="badge">加载中</span>
+      </div>
+      <dl class="status-grid">
+        <div>
+          <dt>管理台</dt>
+          <dd id="serverValue">-</dd>
+        </div>
+        <div>
+          <dt>机器人</dt>
+          <dd id="robotValue">-</dd>
+        </div>
+        <div>
+          <dt>通知中心</dt>
+          <dd id="notifyValue">-</dd>
+        </div>
+        <div>
+          <dt>榜单模块</dt>
+          <dd id="rankValue">-</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>测试机器人消息</h2>
+      </div>
+      <form id="testForm" class="query-form">
+        <input id="messageInput" type="text" value="top20" autocomplete="off">
+        <button type="submit">发送</button>
+      </form>
+      <pre id="replyBox" class="reply-box">等待测试消息</pre>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>榜单模块</h2>
+        <button id="runRankBtn" class="secondary-button">手动扫描</button>
+      </div>
+      <div id="rankTopList" class="rank-list"></div>
+    </section>
+
+    <section class="panel wide">
+      <div class="panel-header">
+        <h2>配置摘要</h2>
+      </div>
+      <pre id="configBox" class="config-box">加载中</pre>
+    </section>
+  </main>
+
+  <main id="settingsView" class="settings-page hidden">
+    <section class="settings-shell">
+      <div class="settings-heading">
+        <div>
+          <h2>配置</h2>
+          <p>配置保存在本机，开发阶段 Secret / API Key 在页面明文显示，文档和日志仍不记录密钥。</p>
+        </div>
+        <button id="backToDashboardBtn" class="secondary-button">返回</button>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="配置分类">
+        <button class="tab-button active" type="button" data-tab="basic">基础配置</button>
+        <button class="tab-button" type="button" data-tab="robot">机器人</button>
+        <button class="tab-button" type="button" data-tab="robot-diagnostics">机器人诊断</button>
+        <button class="tab-button" type="button" data-tab="rank">榜单模块</button>
+        <button class="tab-button" type="button" data-tab="dev-progress">需求监控</button>
+        <button class="tab-button" type="button" data-tab="bug-collection">需求和Bug收集</button>
+        <button class="tab-button" type="button" data-tab="desktop-tip">EA桌面提醒</button>
+        <button class="tab-button" type="button" data-tab="notification">通知中心</button>
+        <button class="tab-button" type="button" data-tab="ai">大模型</button>
+        <button class="tab-button" type="button" data-tab="future">后续模块</button>
+      </div>
+
+      <section id="tab-basic" class="tab-panel active">
+        <form id="basicConfigForm" class="settings-form">
+          <div class="field-grid">
+            <label>
+              <span>管理台监听地址</span>
+              <input id="serverHostInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>管理台端口</span>
+              <input id="serverPortInput" type="number" min="1" max="65535" autocomplete="off">
+            </label>
+            <label>
+              <span>运行环境名称</span>
+              <input id="runtimeNameInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>日志等级</span>
+              <select id="logLevelInput">
+                <option value="debug">debug</option>
+                <option value="info">info</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit">保存基础配置</button>
+            <span id="basicSaveStatus" class="save-status"></span>
+          </div>
+          <p class="muted-note">监听地址和端口保存后需要重启后台才会生效。</p>
+        </form>
+      </section>
+
+      <section id="tab-robot" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>企业微信机器人</h2>
+          <span id="robotConfigBadge" class="badge">加载中</span>
+        </div>
+        <form id="robotConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="robotEnabledInput" type="checkbox">
+            <span>启用企业微信机器人</span>
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>Bot ID</span>
+              <input id="botIdInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入 Bot ID">
+            </label>
+            <label>
+              <span>Bot Secret</span>
+              <input id="botSecretInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入 Bot Secret">
+            </label>
+          </div>
+          <label>
+            <span>欢迎语</span>
+            <input id="welcomeTextInput" type="text" autocomplete="off">
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>自定义反馈卡片发送策略</span>
+              <select id="robotFeedbackCardModeInput">
+                <option value="disabled">关闭</option>
+                <option value="private_only">仅私聊发送</option>
+                <option value="all_chats">群聊和私聊都发送</option>
+              </select>
+            </label>
+            <label>
+              <span>同一目标冷却分钟</span>
+              <input id="robotFeedbackCardCooldownInput" type="number" min="0" max="1440" step="1" autocomplete="off">
+            </label>
+          </div>
+          <p class="muted-note">默认 10 分钟内同一个人最多收到一张反馈卡片；群聊里点击反馈后，卡片只显示“已收到反馈”。</p>
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>主动推送测试</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>目标类型</span>
+                <select id="robotOutboundTargetTypeInput">
+                  <option value="user">成员</option>
+                  <option value="group">群</option>
+                </select>
+              </label>
+              <label>
+                <span>目标 ID</span>
+                <input id="robotOutboundTargetIdInput" type="text" autocomplete="off" placeholder="userid 或 chatid">
+              </label>
+            </div>
+            <label>
+              <span>测试消息</span>
+              <textarea id="robotOutboundMessageInput" rows="3" autocomplete="off"></textarea>
+            </label>
+            <div class="form-actions">
+              <button id="robotPushTestBtn" class="secondary-button" type="button">测试主动推送</button>
+              <button id="robotFeedbackCardTestBtn" class="secondary-button" type="button">测试自定义反馈卡片</button>
+              <span id="robotPushTestStatus" class="save-status"></span>
+            </div>
+            <pre id="robotPushTestResult" class="test-result-box">等待测试</pre>
+          </div>
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>赞踩反馈探针</h3>
+            </div>
+            <pre id="robotFeedbackProbeBox" class="test-result-box">等待反馈事件</pre>
+          </div>
+          <div class="form-actions">
+            <button type="submit">保存机器人配置</button>
+            <span id="robotSaveStatus" class="save-status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section id="tab-robot-diagnostics" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>机器人诊断</h2>
+          <button id="robotDiagnosticsRefreshBtn" class="secondary-button" type="button">刷新诊断</button>
+        </div>
+        <pre id="robotDiagnosticsSummaryBox" class="test-result-box">等待诊断数据</pre>
+        <div class="settings-subsection">
+          <div class="subsection-title">
+            <h3>诊断问题单</h3>
+          </div>
+          <div id="robotDiagnosticsIssueList" class="feedback-list"></div>
+        </div>
+        <div class="settings-subsection">
+          <div class="subsection-title">
+            <h3>最近机器人回复</h3>
+          </div>
+          <div id="robotDiagnosticsTraceList" class="feedback-list"></div>
+        </div>
+        <div class="settings-subsection">
+          <div class="subsection-title">
+            <h3>最近反馈事件</h3>
+          </div>
+          <div id="robotDiagnosticsFeedbackList" class="feedback-list"></div>
+        </div>
+      </section>
+
+      <section id="tab-rank" class="tab-panel">
+        <form id="rankConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="rankEnabledInput" type="checkbox">
+            <span>启用榜单模块适配器</span>
+          </label>
+          <label>
+            <span>榜单模块目录</span>
+            <input id="rankPathInput" type="text" autocomplete="off">
+          </label>
+          <div class="field-grid">
+            <label class="toggle-line">
+              <input id="rankMonitorEnabledInput" type="checkbox">
+              <span>由新后台托管定时扫描</span>
+            </label>
+            <label>
+              <span>扫描间隔分钟</span>
+              <input id="rankMonitorIntervalInput" type="number" min="1" autocomplete="off">
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit">保存榜单配置</button>
+            <span id="rankSaveStatus" class="save-status"></span>
+          </div>
+          <p class="muted-note">EA 已内置榜单源码；旧榜单系统可继续独立运行，互不影响。</p>
+        </form>
+      </section>
+
+      <section id="tab-dev-progress" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>需求总表监控（开发进度）</h2>
+          <span id="devProgressConfigBadge" class="badge">加载中</span>
+        </div>
+        <form id="devProgressConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="devProgressEnabledInput" type="checkbox">
+            <span>启用需求总表监控</span>
+          </label>
+          <label>
+            <span>智能表格链接</span>
+            <input id="devProgressDocUrlInput" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="https://doc.weixin.qq.com/smartsheet/...">
+          </label>
+          <div class="field-grid hidden">
+            <label>
+              <span>docid</span>
+              <input id="devProgressDocIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>sheetId</span>
+              <input id="devProgressSheetIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>viewId</span>
+              <input id="devProgressViewIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>返回 Key 类型</span>
+              <select id="devProgressKeyTypeInput">
+                <option value="CELL_VALUE_KEY_TYPE_FIELD_TITLE">字段标题</option>
+                <option value="CELL_VALUE_KEY_TYPE_FIELD_ID">字段 ID</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-grid hidden">
+            <label>
+              <span>企业 ID</span>
+              <input id="devProgressCorpIdInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入企业 ID">
+            </label>
+            <label>
+              <span>AgentId</span>
+              <input id="devProgressAgentIdInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入 AgentId">
+            </label>
+            <label>
+              <span>应用 Secret</span>
+              <input id="devProgressSecretInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入应用 Secret">
+            </label>
+            <label>
+              <span>单次读取上限</span>
+              <input id="devProgressLimitInput" type="number" min="1" autocomplete="off">
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="toggle-line">
+              <input id="devProgressMonitorEnabledInput" type="checkbox">
+              <span>启用后台轮询</span>
+            </label>
+            <label>
+              <span>轮询间隔分钟</span>
+              <input id="devProgressMonitorIntervalInput" type="number" min="1" autocomplete="off">
+            </label>
+            <label class="toggle-line hidden">
+              <input id="devProgressNotifyInput" type="checkbox">
+              <span>变化后走通知中心</span>
+            </label>
+            <label class="hidden">
+              <span>缓存分钟数</span>
+              <input id="devProgressCacheMinutesInput" type="number" min="0" autocomplete="off">
+            </label>
+          </div>
+          <div class="settings-subsection hidden">
+            <div class="subsection-title">
+              <h3>核心字段映射</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>需求 ID 字段</span>
+                <input id="devProgressDemandIdFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>项目字段</span>
+                <input id="devProgressProjectFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>需求字段</span>
+                <input id="devProgressDemandFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>需求内容字段</span>
+                <input id="devProgressDemandContentFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>需求类型字段</span>
+                <input id="devProgressDemandTypeFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>负责人字段</span>
+                <input id="devProgressOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>状态字段</span>
+                <input id="devProgressStatusFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>进度字段</span>
+                <input id="devProgressProgressFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>计划完成字段</span>
+                <input id="devProgressPlanDateFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>阻塞点字段</span>
+                <input id="devProgressBlockersFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>更新时间字段</span>
+                <input id="devProgressUpdatedAtFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>备注字段</span>
+                <input id="devProgressRemarksFieldInput" type="text" autocomplete="off">
+              </label>
+            </div>
+          </div>
+          <div class="settings-subsection hidden">
+            <div class="subsection-title">
+              <h3>角色字段映射</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>前端开发字段</span>
+                <input id="devProgressFrontendOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>后端开发字段</span>
+                <input id="devProgressBackendOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>前端剩余字段</span>
+                <input id="devProgressFrontendRemainingFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>后端剩余字段</span>
+                <input id="devProgressBackendRemainingFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>UI人员字段</span>
+                <input id="devProgressUiOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>策划负责人字段</span>
+                <input id="devProgressPlannerOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>测试人员字段</span>
+                <input id="devProgressTesterOwnerFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>前端组长字段</span>
+                <input id="devProgressFrontendLeadFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>后端组长字段</span>
+                <input id="devProgressBackendLeadFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>开发截止字段</span>
+                <input id="devProgressDevDeadlineFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>测试截止字段</span>
+                <input id="devProgressTestDeadlineFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>验收截止字段</span>
+                <input id="devProgressAcceptanceDeadlineFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>实际上线字段</span>
+                <input id="devProgressReleaseDateFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>群聊字段</span>
+                <input id="devProgressGroupChatFieldInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>需求链接字段</span>
+                <input id="devProgressDemandLinkFieldInput" type="text" autocomplete="off">
+              </label>
+            </div>
+          </div>
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>扫描与推送</h3>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>扫描记录上限</span>
+                <input id="devProgressRuleScanLimitInput" type="number" min="1" max="5000" autocomplete="off">
+              </label>
+              <label>
+                <span>扫描起始日期</span>
+                <input id="devProgressScanStartDateInput" type="date" autocomplete="off">
+              </label>
+              <label>
+                <span>临时过滤项目</span>
+                <input id="devProgressExcludedProjectsInput" type="text" autocomplete="off" placeholder="小小，魔王">
+              </label>
+              <label class="toggle-line">
+                <input id="devProgressRuleRequiredFieldsInput" type="checkbox">
+                <span>启用必填项监控</span>
+              </label>
+              <label class="toggle-line">
+                <input id="devProgressRequiredFieldsPushEnabledInput" type="checkbox">
+                <span>启用必填项推送</span>
+              </label>
+              <label class="toggle-line hidden" aria-hidden="true">
+                <input id="devProgressRequiredFieldsPushTestModeInput" type="checkbox">
+                <span>测试模式只推给指定人</span>
+              </label>
+              <label class="hidden" aria-hidden="true">
+                <span>测试推送目标</span>
+                <input id="devProgressRequiredFieldsPushTestTargetInput" type="text" autocomplete="off" placeholder="李晶晶">
+              </label>
+              <label class="toggle-line hidden">
+                <input id="devProgressRuleOverdueInput" type="checkbox">
+                <span>检查截止日期逾期</span>
+              </label>
+              <label class="toggle-line hidden">
+                <input id="devProgressRuleStaleInput" type="checkbox">
+                <span>检查长时间未更新</span>
+              </label>
+              <label class="hidden">
+                <span>未更新天数</span>
+                <input id="devProgressRuleStaleDaysInput" type="number" min="1" autocomplete="off">
+              </label>
+              <label class="toggle-line hidden">
+                <input id="devProgressRuleRemainingInput" type="checkbox">
+                <span>检查临近截止仍有剩余</span>
+              </label>
+              <label class="hidden">
+                <span>临近截止天数</span>
+                <input id="devProgressRuleRemainingDaysInput" type="number" min="0" autocomplete="off">
+              </label>
+              <label class="hidden">
+                <span>剩余阈值</span>
+                <input id="devProgressRuleRemainingMinimumInput" type="number" min="0" step="0.1" autocomplete="off">
+              </label>
+              <label class="toggle-line hidden">
+                <input id="devProgressRuleMissingOwnerInput" type="checkbox">
+                <span>检查负责人缺失</span>
+              </label>
+            </div>
+            <p class="muted-note">字段映射、状态关键词、必填规则 JSON 等技术配置已隐藏，保存时继续沿用当前配置。</p>
+            <label class="hidden">
+              <span>必填负责人角色</span>
+              <input id="devProgressRequiredOwnerRolesInput" type="text" autocomplete="off" placeholder="planner,frontend,backend,tester">
+            </label>
+            <label class="hidden">
+              <span>监控字段必填规则 JSON</span>
+              <textarea id="devProgressRequiredFieldsRulesInput" rows="8" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder='{
+  "cumulative": true,
+  "items": [
+    {
+      "demandType": "新功能",
+      "status": "待分配",
+      "owner": "李猛",
+      "requiredFields": ["需求名称", "需求内容", "策划负责人"]
+    },
+    {
+      "demandType": "新功能",
+      "status": "规划中",
+      "owner": "李晶晶",
+      "requiredFields": ["需求截止日期", "前端开发", "后端开发"]
+    }
+  ]
+}'></textarea>
+            </label>
+            <label class="hidden">
+              <span>完成状态关键词</span>
+              <textarea id="devProgressCompletedKeywordsInput" autocomplete="off" spellcheck="false"></textarea>
+            </label>
+            <label class="hidden">
+              <span>忽略状态关键词</span>
+              <textarea id="devProgressIgnoredKeywordsInput" autocomplete="off" spellcheck="false"></textarea>
+            </label>
+          </div>
+          <label class="hidden">
+            <span>人员别名映射（特殊情况才填）</span>
+            <textarea id="devProgressPersonAliasesInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="默认会通过企业微信通讯录把账号解析成中文姓名&#10;特殊情况一行一个：常用名=企业微信姓名"></textarea>
+          </label>
+          <div class="form-actions">
+            <button type="submit">保存需求监控配置</button>
+            <button id="devProgressTestBtn" class="secondary-button" type="button">测试连通性</button>
+            <button id="devProgressPreviewBtn" class="secondary-button" type="button">读取任务摘要</button>
+            <button id="devProgressScanAnomaliesBtn" class="secondary-button" type="button">仅扫描异常任务（不推送）</button>
+            <button id="devProgressPushRequiredFieldsBtn" class="secondary-button" type="button">扫描并推送必填项缺失</button>
+            <span id="devProgressSaveStatus" class="save-status"></span>
+          </div>
+          <pre id="devProgressTestResult" class="test-result-box">等待测试</pre>
+          <pre id="devProgressPreviewResult" class="test-result-box">等待读取</pre>
+          <pre id="devProgressAnomalyResult" class="test-result-box">等待扫描</pre>
+        </form>
+
+        <div class="tab-title-line nested-title">
+          <h2>需求规则（对应需求文档）</h2>
+          <span id="demandWorkflowRulesVersionBadge" class="badge">v-</span>
+        </div>
+        <form id="demandWorkflowRulesForm" class="settings-form">
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>规则摘要</h3>
+              <span id="demandWorkflowRulesStatusBadge" class="badge">加载中</span>
+            </div>
+            <pre id="demandWorkflowRulesSummaryBox" class="test-result-box">加载中</pre>
+          </div>
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>JSON 配置</h3>
+            </div>
+            <label class="full-width">
+              <span>直接编辑完整规则 JSON，保存前会校验格式</span>
+              <textarea id="demandWorkflowRulesJsonInput" class="json-editor" rows="28" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit">保存需求规则</button>
+            <span id="demandWorkflowRulesSaveStatus" class="save-status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section id="tab-bug-collection" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>需求和 Bug 收集</h2>
+          <span id="bugCollectionConfigBadge" class="badge">未配置</span>
+        </div>
+        <form id="bugCollectionConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="bugCollectionEnabledInput" type="checkbox">
+            <span>启用需求和 Bug 收集模块</span>
+          </label>
+          <label>
+            <span>需求和 Bug 收集智能表格链接</span>
+            <input id="bugCollectionDocUrlInput" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="https://doc.weixin.qq.com/smartsheet/...">
+          </label>
+          <label>
+            <span>API 创建文档名</span>
+            <input id="bugCollectionCreateDocNameInput" type="text" autocomplete="off" placeholder="EA需求和Bug收集">
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>API docid</span>
+              <input id="bugCollectionDocIdInput" type="text" autocomplete="off" placeholder="企业微信文档 API 使用的长 docid">
+            </label>
+            <label>
+              <span>链接标识</span>
+              <input id="bugCollectionDocLinkIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>sheetId</span>
+              <input id="bugCollectionSheetIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>viewId</span>
+              <input id="bugCollectionViewIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>返回 Key 类型</span>
+              <select id="bugCollectionKeyTypeInput">
+                <option value="CELL_VALUE_KEY_TYPE_FIELD_TITLE">字段标题</option>
+                <option value="CELL_VALUE_KEY_TYPE_FIELD_ID">字段 ID</option>
+              </select>
+            </label>
+            <label>
+              <span>spaceid（可选）</span>
+              <input id="bugCollectionCreateSpaceIdInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>fatherid（可选）</span>
+              <input id="bugCollectionCreateFatherIdInput" type="text" autocomplete="off">
+            </label>
+          </div>
+          <label>
+            <span>管理员 UserID（可选，一行一个）</span>
+            <textarea id="bugCollectionCreateAdminUsersInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+          </label>
+          <label class="toggle-line">
+            <input id="bugCollectionCreateShareInput" type="checkbox">
+            <span>创建后生成分享链接</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit">保存需求和 Bug 收集配置</button>
+            <button id="bugCollectionCreateDocBtn" class="secondary-button" type="button">API创建并初始化</button>
+            <button id="bugCollectionSetupTestBtn" class="secondary-button" type="button">初始化字段并写入测试记录</button>
+            <button id="bugCollectionMigrateTaskIdsBtn" class="secondary-button" type="button">补齐任务ID</button>
+            <button id="bugCollectionCleanupFieldsBtn" class="secondary-button" type="button">删除多余列</button>
+            <span id="bugCollectionSaveStatus" class="save-status"></span>
+          </div>
+          <p class="muted-note">默认字段：任务ID、类型、标题、描述、截图、提交人、创建时间、更新时间、状态；任务ID 为 5 位数字，自动生成。</p>
+          <pre id="bugCollectionTestResult" class="test-result-box">等待测试</pre>
+        </form>
+      </section>
+
+      <section id="tab-desktop-tip" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>EA 桌面提醒</h2>
+          <span id="desktopTipVersionBadge" class="badge">v0.3.1</span>
+        </div>
+        <div class="settings-subsection">
+          <div class="subsection-title">
+            <h3>当前操作身份</h3>
+            <span id="desktopTipRoleBadge" class="badge">未校验</span>
+            <span id="desktopTipAccessModeBadge" class="badge">测试阶段</span>
+            <span id="desktopTipRegisteredUserBadge" class="badge">已登记 0 台客户端</span>
+            <span id="desktopTipUpdateBadge" class="badge">更新包未读取</span>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>当前登录人</span>
+              <input id="desktopTipIdentityInput" type="text" value="未登录" disabled>
+            </label>
+            <label>
+              <span>sourceKey</span>
+              <input id="desktopTipSourceKeyInput" type="text" value="production_maintenance" disabled>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="desktopTipLoadBtn" class="secondary-button" type="button">读取配置和事件</button>
+            <button id="desktopTipLoginBtn" class="secondary-button" type="button">企业微信扫码登录</button>
+            <span id="desktopTipStatusText" class="save-status"></span>
+          </div>
+          <p class="muted-note">测试阶段：所有已通过企业微信扫码登录的用户均可发送正式服停服更新通知；接收范围固定为全部曾成功启动并连接过 EA 的桌面提醒客户端安装实例，无需接收人登录。</p>
+        </div>
+
+        <form id="desktopTipManualMessageForm" class="settings-form">
+          <div class="settings-subsection highlight-subsection">
+            <div class="subsection-title">
+              <h3>普通消息测试</h3>
+              <span id="desktopTipManualScopeBadge" class="badge">全部已登记客户端（0台）</span>
+            </div>
+            <p class="muted-note">用于先验证“后台填写 -&gt; 已安装客户端收到消息”的基础链路；不进入正式服停服更新状态机。</p>
+            <div class="field-grid">
+              <label>
+                <span>消息标题</span>
+                <input id="desktopTipManualTitleInput" type="text" autocomplete="off" maxlength="80" value="EA桌面提醒测试">
+              </label>
+              <label>
+                <span>接收范围</span>
+                <input id="desktopTipManualScopeInput" type="text" value="全部已登记客户端（0台）" disabled>
+              </label>
+            </div>
+            <label>
+              <span>消息内容</span>
+              <textarea id="desktopTipManualBodyInput" rows="4" maxlength="1000" autocomplete="off" placeholder="请输入要发送到 EA 桌面提醒客户端的测试消息"></textarea>
+            </label>
+            <div class="form-actions">
+              <button id="desktopTipManualSubmitBtn" type="submit" disabled>发送测试消息</button>
+              <span id="desktopTipManualStatus" class="save-status">请先读取配置并确认已有登记客户端</span>
+            </div>
+          </div>
+        </form>
+
+        <form id="desktopTipConfigForm" class="settings-form">
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>消息来源/权限</h3>
+              <span class="badge">production_maintenance</span>
+            </div>
+            <label class="toggle-line">
+              <input id="desktopTipPmEnabledInput" type="checkbox">
+              <span>启用正式服停服更新通知</span>
+            </label>
+            <div class="field-grid">
+              <label>
+                <span>消息管理员 UserID（一行一个）</span>
+                <textarea id="desktopTipAdminsInput" rows="4" autocomplete="off"></textarea>
+              </label>
+              <label>
+                <span>授权发送者 UserID（一行一个）</span>
+                <textarea id="desktopTipSendersInput" rows="4" autocomplete="off"></textarea>
+              </label>
+              <label>
+                <span>可接收用户 UserID（一行一个）</span>
+                <textarea id="desktopTipRecipientsInput" rows="5" autocomplete="off"></textarea>
+              </label>
+              <label>
+                <span>逻辑接收组 JSON</span>
+                <textarea id="desktopTipGroupsInput" class="json-editor compact-json-editor" rows="5" autocomplete="off" spellcheck="false" placeholder='{"formal_ops":["user_a","user_b"]}'></textarea>
+              </label>
+              <label>
+                <span>默认接收组 ID</span>
+                <input id="desktopTipDefaultGroupInput" type="text" autocomplete="off">
+              </label>
+              <label>
+                <span>默认倒计时节点（分钟）</span>
+                <input id="desktopTipCountdownInput" type="text" autocomplete="off" placeholder="30,10,5,1">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit">保存桌面提醒权限配置</button>
+              <span id="desktopTipConfigSaveStatus" class="save-status"></span>
+            </div>
+          </div>
+        </form>
+
+        <form id="desktopTipCreateForm" class="settings-form">
+          <div class="settings-subsection">
+            <div class="subsection-title">
+              <h3>正式服停服更新</h3>
+              <button id="desktopTipRefreshEventsBtn" class="secondary-button" type="button">刷新事件</button>
+            </div>
+            <div class="field-grid">
+              <label>
+                <span>事件标题</span>
+                <input id="desktopTipEventTitleInput" type="text" autocomplete="off" placeholder="正式服停服更新">
+              </label>
+              <label>
+                <span>正式服</span>
+                <input id="desktopTipServerNameInput" type="text" autocomplete="off" value="正式服">
+              </label>
+              <label>
+                <span>计划停服时间</span>
+                <input id="desktopTipStopAtInput" type="datetime-local" autocomplete="off">
+              </label>
+              <label>
+                <span>预计恢复时间</span>
+                <input id="desktopTipResumeAtInput" type="datetime-local" autocomplete="off">
+              </label>
+              <label>
+                <span>接收范围</span>
+                <input id="desktopTipEventGroupInput" type="text" autocomplete="off" value="all_registered_clients" disabled>
+              </label>
+              <label>
+                <span>本事件倒计时节点（可选）</span>
+                <input id="desktopTipEventCountdownInput" type="text" autocomplete="off" placeholder="留空使用默认节点">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button id="desktopTipCreateSubmitBtn" type="submit">新建停服更新事件</button>
+              <span id="desktopTipCreateStatus" class="save-status"></span>
+            </div>
+          </div>
+        </form>
+
+        <div class="settings-subsection">
+          <div class="subsection-title">
+            <h3>当前事件及状态历史</h3>
+            <span id="desktopTipEventCountBadge" class="badge">0</span>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>维护事件 maintenanceId</span>
+              <input id="desktopTipMaintenanceIdInput" type="text" autocomplete="off" placeholder="从下方事件列表复制">
+            </label>
+            <label>
+              <span>延长分钟数</span>
+              <input id="desktopTipExtendMinutesInput" type="number" min="1" max="1440" step="1" autocomplete="off">
+            </label>
+          </div>
+          <label>
+            <span>延长/取消原因（可选）</span>
+            <input id="desktopTipActionReasonInput" type="text" autocomplete="off">
+          </label>
+          <div class="form-actions">
+            <button id="desktopTipStopBtn" class="secondary-button" type="button">手动确认已停服</button>
+            <button id="desktopTipExtendBtn" class="secondary-button" type="button">延长 N 分钟</button>
+            <button id="desktopTipCompleteBtn" class="secondary-button" type="button">正式服更新完成</button>
+            <button id="desktopTipCancelBtn" class="secondary-button" type="button">取消尚未开始事件</button>
+            <span id="desktopTipActionStatus" class="save-status"></span>
+          </div>
+          <pre id="desktopTipEventsBox" class="test-result-box">等待读取</pre>
+        </div>
+      </section>
+
+      <section id="tab-notification" class="tab-panel">
+        <form id="notificationConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="notificationEnabledInput" type="checkbox">
+            <span>启用通知中心</span>
+          </label>
+          <label>
+            <span>默认通知目标</span>
+            <select id="notificationDefaultTargetInput">
+              <option value="group">群</option>
+              <option value="app">个人</option>
+              <option value="both">群和个人</option>
+            </select>
+          </label>
+          <label>
+            <span>群 Webhook</span>
+            <input id="groupWebhookInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入群 Webhook">
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>企业 ID</span>
+              <input id="appCorpIdInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入企业 ID">
+            </label>
+            <label>
+              <span>AgentId</span>
+              <input id="appAgentIdInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入 AgentId">
+            </label>
+            <label>
+              <span>应用 Secret</span>
+              <input id="appSecretInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入应用 Secret">
+            </label>
+            <label>
+              <span>接收成员 UserID</span>
+              <input id="appToUserInput" type="text" autocomplete="off">
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit">保存通知配置</button>
+            <span id="notificationSaveStatus" class="save-status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section id="tab-ai" class="tab-panel">
+        <div class="tab-title-line">
+          <h2>大模型配置</h2>
+          <span id="aiConfigBadge" class="badge">加载中</span>
+        </div>
+        <form id="aiConfigForm" class="settings-form">
+          <label class="toggle-line">
+            <input id="aiEnabledInput" type="checkbox">
+            <span>启用大模型</span>
+          </label>
+          <label>
+            <span>当前 Provider</span>
+            <select id="aiProviderInput"></select>
+          </label>
+          <div class="field-grid">
+            <label>
+              <span>接口地址</span>
+              <input id="aiBaseUrlInput" type="text" autocomplete="off">
+            </label>
+            <label>
+              <span>模型</span>
+              <input id="aiModelInput" type="text" autocomplete="off">
+            </label>
+          </div>
+          <label>
+            <span>API Key</span>
+            <input id="aiApiKeyInput" class="secret-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="请输入 API Key">
+          </label>
+          <div class="form-actions">
+            <button type="submit">保存大模型配置</button>
+            <span id="aiSaveStatus" class="save-status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section id="tab-future" class="tab-panel">
+        <div class="future-grid">
+          <label class="toggle-line disabled-line">
+            <input type="checkbox" disabled>
+            <span>活动情报模块</span>
+          </label>
+          <label class="toggle-line disabled-line">
+            <input type="checkbox" disabled>
+            <span>跨模块历史查询</span>
+          </label>
+          <label class="toggle-line disabled-line">
+            <input type="checkbox" disabled>
+            <span>管理员模块</span>
+          </label>
+        </div>
+        <p class="muted-note">这些模块还未接入，后续实现后会在这里开放配置。</p>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
