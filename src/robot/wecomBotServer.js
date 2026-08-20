@@ -67,6 +67,18 @@ function firstString(...values) {
   return "";
 }
 
+function createMarkdownMessagePayload(content, options = {}) {
+  const text = String(content || "").trim();
+  const payload = {
+    msgtype: "markdown",
+    markdown: { content: text }
+  };
+  if (options && options.mentionAll) {
+    payload.mentioned_list = ["@all"];
+  }
+  return payload;
+}
+
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -297,6 +309,20 @@ function senderFromFrame(frame) {
     source: "wecom-smart-bot",
     chatType: body.chattype || "",
     chatId: body.chatid || "",
+    chatName: firstString(
+      body.chatname,
+      body.chat_name,
+      body.groupname,
+      body.group_name,
+      body.roomname,
+      body.room_name
+    ),
+    groupName: firstString(
+      body.groupname,
+      body.group_name,
+      body.chatname,
+      body.chat_name
+    ),
     userId: firstString(
       body.userid,
       body.user_id,
@@ -546,6 +572,7 @@ function createWecomBotServer(options) {
   const logger = options.logger;
   const diagnostics = options.diagnostics;
   const watchdog = options.watchdog;
+  const desktopTip = options.desktopTip;
   let monitorManager = options.monitorManager || null;
   const sdkSearchDirs = options.sdkSearchDirs || [];
   let wsClient = null;
@@ -637,7 +664,7 @@ function createWecomBotServer(options) {
     };
   }
 
-  async function sendMarkdownMessage(targetId, content) {
+  async function sendMarkdownMessage(targetId, content, options = {}) {
     if (!wsClient || !running) {
       throw new Error("企业微信机器人未运行，不能主动推送");
     }
@@ -652,10 +679,8 @@ function createWecomBotServer(options) {
       throw new Error("主动推送内容不能为空");
     }
 
-    return wsClient.sendMessage(String(targetId).trim(), {
-      msgtype: "markdown",
-      markdown: { content: text }
-    });
+    const payload = createMarkdownMessagePayload(text, options);
+    return wsClient.sendMessage(String(targetId).trim(), payload);
   }
 
   async function sendTemplateCardMessage(targetId, templateCard) {
@@ -1060,6 +1085,28 @@ function createWecomBotServer(options) {
       logger.info("WeCom text message received", { length: content.length });
       let processingReply = null;
       try {
+        if (desktopTip && typeof desktopTip.captureWecomGroupBindingMessage === "function") {
+          const desktopTipGroupResult = await desktopTip.captureWecomGroupBindingMessage({
+            text: content,
+            sender,
+            raw: frame
+          });
+          if (desktopTipGroupResult && desktopTipGroupResult.handled) {
+            const replyContent = desktopTipGroupResult.message || "已处理 M04 通知群设置。";
+            const reply = await replyText(frame, replyContent);
+            logger.info("WeCom desktop tip group binding command handled", {
+              sourceKey: "desktop_tip_wecom_group_registry",
+              action: desktopTipGroupResult.action || "",
+              ok: Boolean(desktopTipGroupResult.ok),
+              chatType: sender.chatType || "",
+              hasChatId: Boolean(sender.chatId),
+              hasUserId: Boolean(sender.userId),
+              replyStarted: Boolean(reply && reply.streamId)
+            });
+            return;
+          }
+        }
+
         if (monitorManager && typeof monitorManager.captureTextMessage === "function") {
           const monitorResult = await monitorManager.captureTextMessage({
             text: content,
@@ -1510,5 +1557,7 @@ function createWecomBotServer(options) {
 }
 
 module.exports = {
-  createWecomBotServer
+  createWecomBotServer,
+  createMarkdownMessagePayload,
+  senderFromFrame
 };

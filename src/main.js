@@ -142,7 +142,8 @@ function buildRuntime(config, logger) {
     sdkSearchDirs: [],
     logger,
     diagnostics: robotDiagnostics,
-    watchdog: modules.watchdog
+    watchdog: modules.watchdog,
+    desktopTip: modules.desktopTip
   });
   modules.watchdog.setRobotServer(robotServer);
 

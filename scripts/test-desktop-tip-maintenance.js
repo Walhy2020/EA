@@ -10,6 +10,7 @@ const {
   createDemandH5Session
 } = require("../src/admin/demandH5Session");
 const { createDesktopTipModule } = require("../src/modules/desktopTip/desktopTipModule");
+const { createMarkdownMessagePayload, senderFromFrame } = require("../src/robot/wecomBotServer");
 
 function tempFile(root, name) {
   return path.join(root, name);
@@ -55,13 +56,17 @@ function createModule(root, overrides = {}) {
     moduleConfig: {
       enabled: true,
       name: "EA 桌面提醒",
-      version: "0.3.1",
+      version: "0.3.2",
       storePath: tempFile(root, "events.json"),
       ttlMinutes: 240,
       clientRegistry: {
         storePath: tempFile(root, "clients.json"),
         persistIntervalSeconds: overrides.persistIntervalSeconds || 3600,
         maxRegisteredClients: 1000
+      },
+      wecomGroupRegistry: {
+        storePath: tempFile(root, "wecom-groups.json"),
+        maxGroups: 50
       },
       productionMaintenance,
       ...(overrides.moduleConfig || {})
@@ -257,7 +262,7 @@ async function runManualMessageApiTests() {
   const previousSecret = process.env.WECOM_DOC_SECRET;
   process.env.WECOM_DOC_SECRET = "desktop-tip-manual-message-secret";
   const logger = { info() {}, warn() {}, error() {} };
-  const createServer = (desktopTip) => createAdminServer({
+  const createServer = (desktopTip, robotServer = {}) => createAdminServer({
     config: {
       app: {
         server: { host: "127.0.0.1", port: 0, https: { enabled: false } },
@@ -269,7 +274,7 @@ async function runManualMessageApiTests() {
     },
     router: { handleMessage: async () => ({ ok: true }) },
     modules: { desktopTip },
-    robotServer: {},
+    robotServer,
     robotDiagnostics: {},
     monitorManager: { getStatus: () => ({}) },
     notificationCenter: { getStatus: () => ({}) },
@@ -299,6 +304,21 @@ async function runManualMessageApiTests() {
       body: "manual message"
     }, ordinaryCookie);
     assert.equal(response.status, 409, "manual message must reject zero registered desktop clients");
+
+    const emptyBind = emptyDesktopTip.captureWecomGroupBindingMessage({
+      text: "@1号机器人 绑定M04通知群 空客户端群",
+      sender: { chatType: "group", chatId: "chat_empty", userId: "ordinary_user", name: "Ordinary User" }
+    });
+    assert.equal(emptyBind.ok, true);
+    response = await requestJson(emptyBaseUrl, "POST", "/api/desktop-tip/manual-message", {
+      title: "EA desktop tip test",
+      body: "manual message",
+      wecomGroups: {
+        enabled: true,
+        targets: [{ groupId: emptyBind.group.groupId, mentionMode: "all" }]
+      }
+    }, ordinaryCookie);
+    assert.equal(response.status, 409, "zero desktop clients must reject before optional group notification");
   } finally {
     emptyAdminServer.stop();
     emptyDesktopTip.stop();
@@ -308,7 +328,18 @@ async function runManualMessageApiTests() {
   const desktopTip = createModule(root);
   pollDevice(desktopTip, "manual_client_a", "0.3.0");
   pollDevice(desktopTip, "manual_client_b", "0.3.0");
-  const adminServer = createServer(desktopTip);
+  const groupSends = [];
+  const failedChatIds = new Set();
+  const robotServer = {
+    sendMarkdownMessage: async (chatId, content, options = {}) => {
+      groupSends.push({ chatId, content, options });
+      if (failedChatIds.has(chatId)) {
+        throw new Error(`mock group failed ${chatId}`);
+      }
+      return { errcode: 0 };
+    }
+  };
+  const adminServer = createServer(desktopTip, robotServer);
   const server = adminServer.start();
   if (!server.listening) {
     await new Promise((resolve) => server.once("listening", resolve));
@@ -358,6 +389,8 @@ async function runManualMessageApiTests() {
     assert.equal(response.data.recipientCount, 2);
     assert.equal(response.data.queuedCount, 2);
     assert.equal(response.data.failedCount, 0);
+    assert.equal(response.data.wecomGroups.enabled, false, "group notification must be disabled by default");
+    assert.equal(groupSends.length, 0, "default manual desktop message must not send WeCom group notification");
 
     const clientAEvents = pollDevice(desktopTip, "manual_client_a", "0.3.0");
     const clientBEvents = pollDevice(desktopTip, "manual_client_b", "0.3.0");
@@ -381,6 +414,64 @@ async function runManualMessageApiTests() {
     assert.equal(pollDevice(desktopTip, "manual_client_a", "0.3.0").some((event) => event.id === manualA[0].id), false, "acked manual message must not show again");
 
     assert.equal(fs.existsSync(tempFile(root, "maintenance.json")), false, "manual message must not write production maintenance store");
+
+    const bindA = desktopTip.captureWecomGroupBindingMessage({
+      text: "@1号机器人 绑定M04通知群 正式服通知群A",
+      sender: { chatType: "group", chatId: "chat_group_a", userId: "ordinary_user", name: "Ordinary User" }
+    });
+    const bindB = desktopTip.captureWecomGroupBindingMessage({
+      text: "@1号机器人 绑定M04通知群 正式服通知群B",
+      sender: { chatType: "group", chatId: "chat_group_b", userId: "ordinary_user", name: "Ordinary User" }
+    });
+    assert.equal(bindA.ok, true);
+    assert.equal(bindB.ok, true);
+
+    const beforeInvalidGroupEvents = pollDevice(desktopTip, "manual_client_a", "0.3.0").length;
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/manual-message", {
+      title: "EA desktop tip test",
+      body: "manual message body",
+      wecomGroups: { enabled: true, targets: [] }
+    }, ordinaryCookie);
+    assert.equal(response.status, 400, "checked group notification without target must return 400");
+    assert.equal(pollDevice(desktopTip, "manual_client_a", "0.3.0").length, beforeInvalidGroupEvents, "invalid group selection must not queue desktop event");
+
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/manual-message", {
+      title: "EA desktop tip group test",
+      body: "manual message body",
+      operatorUserId: "forged_user",
+      wecomGroups: {
+        enabled: true,
+        targets: [{ groupId: bindA.group.groupId, mentionMode: "all" }]
+      }
+    }, ordinaryCookie, { "x-ea-operator-userid": "forged_user" });
+    assert.equal(response.status, 200, "signed user can send optional group notification");
+    assert.equal(response.data.operator.userId, "ordinary_user", "group notification operator must still come from signed session");
+    assert.equal(response.data.queuedCount, 2, "desktop delivery must still queue for both clients");
+    assert.equal(response.data.wecomGroups.successCount, 1);
+    assert.equal(response.data.wecomGroups.failedCount, 0);
+    assert.equal(groupSends[groupSends.length - 1].chatId, "chat_group_a");
+    assert.equal(groupSends[groupSends.length - 1].options.mentionAll, true, "@all mode must be passed to robot sender");
+    assert.match(groupSends[groupSends.length - 1].content, /@所有人/, "@all message content must be clear");
+
+    failedChatIds.add("chat_group_b");
+    response = await requestJson(baseUrl, "POST", "/api/desktop-tip/manual-message", {
+      title: "EA desktop tip group partial test",
+      body: "manual message body",
+      wecomGroups: {
+        enabled: true,
+        targets: [
+          { groupId: bindA.group.groupId, mentionMode: "none" },
+          { groupId: bindB.group.groupId, mentionMode: "none" }
+        ]
+      }
+    }, ordinaryCookie);
+    assert.equal(response.status, 200, "partial group failure must not roll back desktop delivery");
+    assert.equal(response.data.queuedCount, 2);
+    assert.equal(response.data.wecomGroups.requestedCount, 2);
+    assert.equal(response.data.wecomGroups.successCount, 1);
+    assert.equal(response.data.wecomGroups.failedCount, 1);
+    assert.ok(response.data.wecomGroups.results.some((item) => !item.ok && /mock group failed/.test(item.message)), "failed group reason must be returned");
+
     const watchdogEvent = desktopTip.createTip({
       source: "watchdog",
       targetUserId: "watchdog_manual_user",
@@ -517,6 +608,130 @@ function runClientRegistryTests() {
   pollDevice(corruptModule, "install_corrupt", "0.3.0");
   assert.ok(corruptLogs.some((entry) => /client registry is invalid/i.test(entry.message)), "corrupt registry must be logged");
   assert.equal(corruptModule.getStatus().clientRegistry.registeredClientCount, 1, "corrupt registry fallback must not block polling");
+  corruptModule.stop();
+}
+
+function runWecomGroupRegistryTests() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ea-desktop-tip-wecom-groups-"));
+  let module = createModule(root);
+  assert.deepEqual(
+    createMarkdownMessagePayload("@所有人\n**EA桌面提醒**", { mentionAll: true }),
+    {
+      msgtype: "markdown",
+      markdown: { content: "@所有人\n**EA桌面提醒**" },
+      mentioned_list: ["@all"]
+    },
+    "mentionMode=all must put @all into the final sendMessage payload body"
+  );
+  const realCallbackSender = senderFromFrame({
+    body: {
+      chattype: "group",
+      chatid: "chat_from_real_callback",
+      chatname: "真实回调群名",
+      from: { userid: "callback_sender" },
+      text: { content: "@1号机器人 绑定M04通知群" }
+    }
+  });
+  assert.equal(realCallbackSender.chatType, "group", "real WeCom group callback chattype must be parsed");
+  assert.equal(realCallbackSender.chatId, "chat_from_real_callback", "real WeCom group callback chatid must be parsed");
+  assert.equal(realCallbackSender.userId, "callback_sender", "real WeCom group callback sender userid must be parsed from from.userid");
+  assert.equal(realCallbackSender.chatName, "真实回调群名", "real WeCom group callback chat name must be parsed when available");
+
+  let result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 正式服通知群",
+    sender: {
+      chatType: "single",
+      chatId: "chat_private",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.handled, true, "binding command must be recognized");
+  assert.equal(result.ok, false, "non-group callback must be rejected");
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 正式服通知群",
+    sender: {
+      chatType: "group",
+      chatId: "",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, false, "group callback without chatid must be rejected");
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 正式服通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, true, "valid group callback must bind group");
+  assert.equal(result.action, "bind");
+  assert.match(result.group.displayName, /正式服通知群/);
+  assert.equal(pollDevice(module, "binding_check_client", "0.3.4").length, 0, "binding command must only update configuration and must not create desktop notification");
+  assert.equal(Object.prototype.hasOwnProperty.call(result.group, "chatId"), false, "registry status must not expose raw chatid");
+  const groupId = result.group.groupId;
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 正式服通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.idempotent, true, "repeat bind must be idempotent");
+  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 1);
+
+  const targets = module.resolveWecomGroupTargets([{ groupId, mentionMode: "all" }]);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].chatId, "chat_formal_ops", "send adapter must resolve raw chatid internally");
+  assert.equal(targets[0].mentionMode, "all");
+  assertThrowsStatus(() => module.resolveWecomGroupTargets([{ groupId: "wg_missing" }]), 400, "invalid group target must return 400");
+
+  module.stop();
+  module = createModule(root);
+  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 1, "group registry must recover after restart");
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 解绑M04通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, true, "unbind command must succeed from the same real group callback");
+  assert.equal(result.action, "unbind");
+  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 0);
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 解绑M04通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.idempotent, true, "repeat unbind must be idempotent");
+
+  module.stop();
+
+  const corruptRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ea-desktop-tip-wecom-groups-corrupt-"));
+  fs.writeFileSync(tempFile(corruptRoot, "wecom-groups.json"), "{broken", "utf8");
+  const logs = [];
+  const corruptModule = createModule(corruptRoot, { logs });
+  assert.equal(corruptModule.getStatus().wecomGroupRegistry.groupCount, 0, "corrupt group registry must fallback to empty");
+  assert.ok(logs.some((entry) => /WeCom group registry is invalid/i.test(entry.message)), "corrupt group registry must be logged");
   corruptModule.stop();
 }
 
@@ -673,6 +888,7 @@ async function main() {
   module.stop();
   restartModule.stop();
   runClientRegistryTests();
+  runWecomGroupRegistryTests();
   await runApiPermissionTests();
   await runManualMessageApiTests();
   console.log("Desktop tip production maintenance tests passed");

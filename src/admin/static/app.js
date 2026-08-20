@@ -6,6 +6,7 @@ const state = {
   robotDiagnostics: null,
   desktopTipIdentity: null,
   desktopTipRegisteredClientCount: 0,
+  desktopTipWecomGroups: [],
   desktopTipManualCanSend: false,
   desktopTipManualSending: false,
   activeTab: "basic"
@@ -1376,6 +1377,7 @@ function updateDesktopTipManualMessageControls(registeredClientCount, canSend) {
   if ($("desktopTipManualSubmitBtn")) {
     $("desktopTipManualSubmitBtn").disabled = state.desktopTipManualSending || !canSend || state.desktopTipRegisteredClientCount <= 0;
   }
+  updateDesktopTipManualWecomControls(canSend);
   if ($("desktopTipManualStatus")) {
     if (!canSend) {
       setText("desktopTipManualStatus", "请先使用企业微信扫码登录后再发送普通桌面消息");
@@ -1387,6 +1389,70 @@ function updateDesktopTipManualMessageControls(registeredClientCount, canSend) {
   }
 }
 
+function renderDesktopTipWecomGroups(payload) {
+  const registry = payload && payload.wecomGroupRegistry
+    ? payload.wecomGroupRegistry
+    : (payload && payload.wecomGroups ? payload.wecomGroups : payload);
+  const groups = registry && Array.isArray(registry.groups) ? registry.groups : [];
+  state.desktopTipWecomGroups = groups;
+  const select = $("desktopTipManualWecomGroupSelect");
+  if (select) {
+    select.innerHTML = groups.map((group) => {
+      const groupId = String(group.groupId || "").replace(/"/g, "&quot;");
+      const label = String(group.displayName || group.groupId || "未命名群")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      return `<option value="${groupId}">${label}</option>`;
+    }).join("");
+  }
+  updateDesktopTipManualWecomControls(state.desktopTipManualCanSend);
+}
+
+function updateDesktopTipManualWecomControls(canSend) {
+  const enabledInput = $("desktopTipManualWecomEnabledInput");
+  const groupSelect = $("desktopTipManualWecomGroupSelect");
+  const mentionModeInput = $("desktopTipManualWecomMentionModeInput");
+  const groups = state.desktopTipWecomGroups || [];
+  const enabled = Boolean(enabledInput && enabledInput.checked);
+  if (enabledInput) {
+    enabledInput.disabled = !canSend || groups.length <= 0;
+  }
+  if (groupSelect) {
+    groupSelect.disabled = !canSend || !enabled || groups.length <= 0;
+  }
+  if (mentionModeInput) {
+    mentionModeInput.disabled = !canSend || !enabled || groups.length <= 0;
+  }
+  if ($("desktopTipManualWecomStatus")) {
+    if (groups.length <= 0) {
+      setText("desktopTipManualWecomStatus", "暂无已绑定群；请先在目标群发送：@1号机器人 绑定M04通知群");
+    } else if (!enabled) {
+      setText("desktopTipManualWecomStatus", `已绑定 ${groups.length} 个群；默认不发送群通知`);
+    } else {
+      setText("desktopTipManualWecomStatus", "已启用群通知，请选择一个或多个已绑定群；@所有人强提醒效果以企业微信智能机器人支持为准");
+    }
+  }
+}
+
+function selectedDesktopTipWecomGroupTargets() {
+  const enabledInput = $("desktopTipManualWecomEnabledInput");
+  if (!enabledInput || !enabledInput.checked) {
+    return { enabled: false, targets: [] };
+  }
+  const select = $("desktopTipManualWecomGroupSelect");
+  const selected = select && select.selectedOptions
+    ? Array.from(select.selectedOptions).map((option) => option.value).filter(Boolean)
+    : [];
+  const mentionMode = $("desktopTipManualWecomMentionModeInput") && $("desktopTipManualWecomMentionModeInput").value === "all"
+    ? "all"
+    : "none";
+  return {
+    enabled: true,
+    targets: selected.map((groupId) => ({ groupId, mentionMode }))
+  };
+}
+
 function applyDesktopTipStatusToControls(status) {
   const registeredClientCount = resolveDesktopTipRegisteredClientCount(status, state.desktopTipRegisteredClientCount);
   if ($("desktopTipRegisteredUserBadge")) {
@@ -1394,6 +1460,7 @@ function applyDesktopTipStatusToControls(status) {
     $("desktopTipRegisteredUserBadge").classList.toggle("error", registeredClientCount <= 0);
   }
   const desktopTip = status && status.modules ? status.modules.desktopTip || {} : {};
+  renderDesktopTipWecomGroups(desktopTip);
   if ($("desktopTipVersionBadge") && desktopTip.version) {
     $("desktopTipVersionBadge").textContent = `v${desktopTip.version}`;
   }
@@ -1425,12 +1492,13 @@ function renderDesktopTipConfig(payload) {
   $("desktopTipRegisteredUserBadge").textContent = `已登记 ${registeredClientCount} 台客户端`;
   $("desktopTipRegisteredUserBadge").classList.toggle("error", registeredClientCount <= 0);
   const clientUpdate = payload && payload.clientUpdate ? payload.clientUpdate : {};
+  renderDesktopTipWecomGroups(payload && payload.wecomGroups ? payload.wecomGroups : {});
   $("desktopTipUpdateBadge").textContent = clientUpdate.packageReady
     ? `可更新客户端 v${clientUpdate.version}`
     : "客户端更新包未就绪";
   $("desktopTipUpdateBadge").classList.toggle("error", !clientUpdate.packageReady);
   $("desktopTipRoleBadge").classList.toggle("error", !(payload && (payload.canManage || payload.canSend)));
-  $("desktopTipVersionBadge").textContent = config.version ? `v${config.version}` : "v0.3.1";
+  $("desktopTipVersionBadge").textContent = config.version ? `v${config.version}` : "v0.3.2";
   setDesktopTipConfigEditable(Boolean(payload && payload.canManage));
   updateDesktopTipManualMessageControls(registeredClientCount, canSendDesktopTip);
   if (!payload || !(payload.canManage || payload.canSend)) {
@@ -1508,6 +1576,11 @@ async function sendDesktopTipManualMessage(event) {
     setText("desktopTipManualStatus", "消息标题和消息内容不能为空");
     return;
   }
+  const wecomGroups = selectedDesktopTipWecomGroupTargets();
+  if (wecomGroups.enabled && wecomGroups.targets.length <= 0) {
+    setText("desktopTipManualStatus", "已勾选企业微信群通知，请至少选择 1 个已绑定群");
+    return;
+  }
   state.desktopTipManualSending = true;
   updateDesktopTipManualMessageControls(registeredCount, state.desktopTipManualCanSend);
   setText("desktopTipManualStatus", "发送中...");
@@ -1516,10 +1589,18 @@ async function sendDesktopTipManualMessage(event) {
       method: "POST",
       body: JSON.stringify({
         title,
-        body
+        body,
+        wecomGroups
       })
     });
-    const successMessage = `已排队 ${result.queuedCount || 0}/${result.recipientCount || 0} 台，批次 ${result.batchId || ""}`;
+    const groupResult = result.wecomGroups || {};
+    const groupMessage = groupResult.enabled
+      ? `；群成功 ${groupResult.successCount || 0}/${groupResult.requestedCount || 0}，失败 ${groupResult.failedCount || 0}`
+      : "";
+    const failedGroups = groupResult.enabled && Array.isArray(groupResult.results)
+      ? groupResult.results.filter((item) => !item.ok).map((item) => `${item.displayName || item.groupId}：${item.message || item.errmsg || item.errcode || "发送失败"}`).join("；")
+      : "";
+    const successMessage = `已排队 ${result.queuedCount || 0}/${result.recipientCount || 0} 台${groupMessage}，批次 ${result.batchId || ""}${failedGroups ? `；失败群：${failedGroups}` : ""}`;
     setText("desktopTipManualStatus", successMessage);
     await loadDesktopTipMaintenance();
     setText("desktopTipManualStatus", successMessage);
@@ -1720,6 +1801,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }));
   $("desktopTipLoginBtn").addEventListener("click", openDesktopTipLogin);
   $("desktopTipManualMessageForm").addEventListener("submit", sendDesktopTipManualMessage);
+  $("desktopTipManualWecomEnabledInput").addEventListener("change", () => updateDesktopTipManualWecomControls(state.desktopTipManualCanSend));
   $("desktopTipConfigForm").addEventListener("submit", saveDesktopTipConfig);
   $("desktopTipCreateForm").addEventListener("submit", createDesktopTipMaintenance);
   $("desktopTipRefreshEventsBtn").addEventListener("click", () => loadDesktopTipEvents().catch((error) => {

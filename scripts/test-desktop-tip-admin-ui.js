@@ -38,7 +38,30 @@ class FakeElement {
     this.value = "";
     this.disabled = false;
     this.checked = false;
+    this.options = [];
     this.classList = new FakeClassList();
+  }
+
+  get innerHTML() {
+    return this._innerHTML || "";
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value || "");
+    this.options = [];
+    const optionRegex = /<option\s+value="([^"]*)"[^>]*>(.*?)<\/option>/g;
+    let match = null;
+    while ((match = optionRegex.exec(this._innerHTML))) {
+      this.options.push({
+        value: match[1],
+        textContent: match[2],
+        selected: false
+      });
+    }
+  }
+
+  get selectedOptions() {
+    return this.options.filter((option) => option.selected);
   }
 
   addEventListener() {}
@@ -88,13 +111,14 @@ function createHarness(fetchHandler) {
 function statusWithRegisteredClients(count) {
   return {
     ok: true,
-    app: { version: "0.6.62" },
+    app: { version: "0.6.65" },
     config: { server: { host: "127.0.0.1", port: 39200 } },
     modules: {
       rank: { files: {} },
       desktopTip: {
-        version: "0.3.1",
+        version: "0.3.2",
         clientRegistry: { registeredClientCount: count },
+        wecomGroupRegistry: { enabled: true, groupCount: 0, groups: [] },
         clientUpdate: { packageReady: true, version: "0.3.4" },
         productionMaintenance: {
           registeredReceivers: { registeredClientCount: count }
@@ -131,7 +155,7 @@ async function main() {
       canManage: false,
       role: "sender",
       accessMode: "all_signed_in",
-      config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
+      config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
       clientUpdate: { packageReady: true, version: "0.3.4" }
     });
   `);
@@ -157,7 +181,7 @@ async function main() {
         role: "sender",
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
-        config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
+        config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
         clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }
@@ -200,7 +224,7 @@ async function main() {
         role: "sender",
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
-        config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
+        config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
         clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }
@@ -219,7 +243,7 @@ async function main() {
       role: "sender",
       accessMode: "all_signed_in",
       registeredReceivers: { registeredClientCount: 2 },
-      config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
+      config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
       clientUpdate: { packageReady: true, version: "0.3.4" }
     });
     $("desktopTipManualTitleInput").value = "EA桌面提醒测试";
@@ -232,6 +256,103 @@ async function main() {
     "manual message send must directly post to manual-message API"
   );
   assert.match(manualHarness.element("desktopTipManualStatus").textContent, /已排队|2\/2/, "manual message success must show queued count");
+  const manualPost = manualCalls.find((call) => call.url === "/api/desktop-tip/manual-message" && call.method === "POST");
+  assert.deepEqual(JSON.parse(manualPost.body).wecomGroups, { enabled: false, targets: [] }, "manual message must keep group notification disabled by default");
+
+  const groupCalls = [];
+  const groupHarness = createHarness(async (url, options = {}) => {
+    groupCalls.push({ url, method: options.method || "GET", body: options.body || "" });
+    if (url === "/api/desktop-tip/manual-message") {
+      return response(true, {
+        ok: true,
+        batchId: "manual_batch_group",
+        queuedCount: 2,
+        recipientCount: 2,
+        wecomGroups: {
+          enabled: true,
+          requestedCount: 1,
+          successCount: 1,
+          failedCount: 0,
+          results: [{ groupId: "wg_test", displayName: "正式服通知群", mentionMode: "all", ok: true }]
+        }
+      });
+    }
+    if (url === "/api/desktop-tip/maintenance/config") {
+      return response(true, {
+        ok: true,
+        canSend: true,
+        canManage: false,
+        role: "sender",
+        accessMode: "all_signed_in",
+        registeredReceivers: { registeredClientCount: 2 },
+        wecomGroups: {
+          enabled: true,
+          groupCount: 1,
+          groups: [{ groupId: "wg_test", displayName: "正式服通知群" }]
+        },
+        config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
+        clientUpdate: { packageReady: true, version: "0.3.4" }
+      });
+    }
+    if (url === "/api/desktop-tip/maintenance/events?limit=30") {
+      return response(true, { ok: true, events: [] });
+    }
+    return response(false, { message: `unexpected ${url}` }, 404);
+  });
+  groupHarness.run(`renderStatus(${JSON.stringify({
+    ...statusWithRegisteredClients(2),
+    modules: {
+      ...statusWithRegisteredClients(2).modules,
+      desktopTip: {
+        ...statusWithRegisteredClients(2).modules.desktopTip,
+        wecomGroupRegistry: {
+          enabled: true,
+          groupCount: 1,
+          groups: [{ groupId: "wg_test", displayName: "正式服通知群" }]
+        }
+      }
+    }
+  })})`);
+  groupHarness.run(`
+    state.desktopTipIdentity = { userId: "signed_user", name: "Signed User" };
+    renderDesktopTipConfig({
+      ok: true,
+      canSend: true,
+      canManage: false,
+      role: "sender",
+      accessMode: "all_signed_in",
+      registeredReceivers: { registeredClientCount: 2 },
+      wecomGroups: {
+        enabled: true,
+        groupCount: 1,
+        groups: [{ groupId: "wg_test", displayName: "正式服通知群" }]
+      },
+      config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
+      clientUpdate: { packageReady: true, version: "0.3.4" }
+    });
+    $("desktopTipManualTitleInput").value = "EA桌面提醒测试";
+    $("desktopTipManualBodyInput").value = "普通消息正文";
+    $("desktopTipManualWecomEnabledInput").checked = true;
+    updateDesktopTipManualWecomControls(true);
+  `);
+  await groupHarness.run(`sendDesktopTipManualMessage({ preventDefault() {} })`);
+  assert.equal(groupCalls.some((call) => call.url === "/api/desktop-tip/manual-message"), false, "checked group notification without selected group must not post");
+  assert.match(groupHarness.element("desktopTipManualStatus").textContent, /至少选择/, "checked group notification without selected group must show validation");
+
+  groupHarness.run(`
+    $("desktopTipManualWecomGroupSelect").options[0].selected = true;
+    $("desktopTipManualWecomMentionModeInput").value = "all";
+    updateDesktopTipManualWecomControls(true);
+  `);
+  assert.match(groupHarness.element("desktopTipManualWecomStatus").textContent, /企业微信智能机器人支持/, "@all mode boundary must be visible in admin UI");
+  await groupHarness.run(`sendDesktopTipManualMessage({ preventDefault() {} })`);
+  const groupPost = groupCalls.find((call) => call.url === "/api/desktop-tip/manual-message" && call.method === "POST");
+  const groupPayload = JSON.parse(groupPost.body);
+  assert.deepEqual(groupPayload.wecomGroups, {
+    enabled: true,
+    targets: [{ groupId: "wg_test", mentionMode: "all" }]
+  }, "checked group notification must post selected group and @all mode");
+  assert.match(groupHarness.element("desktopTipManualStatus").textContent, /群成功 1\/1/, "manual status must show group success result");
 
   const confirmHarness = createHarness(async (url) => {
     if (url === "/api/desktop-tip/maintenance/stop") {
@@ -245,7 +366,7 @@ async function main() {
         role: "sender",
         accessMode: "all_signed_in",
         registeredReceivers: { registeredClientCount: 2 },
-        config: { version: "0.3.1", countdownMinutes: [30, 10, 5, 1] },
+        config: { version: "0.3.2", countdownMinutes: [30, 10, 5, 1] },
         clientUpdate: { packageReady: true, version: "0.3.4" }
       });
     }

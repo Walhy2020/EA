@@ -6,9 +6,10 @@ const path = require("path");
 const { resolveProjectPath } = require("../../utils/paths");
 const { createProductionMaintenanceManager } = require("./productionMaintenance");
 
-const DEFAULT_VERSION = "0.3.1";
+const DEFAULT_VERSION = "0.3.2";
 const TERMINAL_ACTIONS = new Set(["dismissed", "opened", "done"]);
 const MANUAL_MESSAGE_SOURCE_KEY = "admin_manual_message";
+const WECOM_GROUP_REGISTRY_SOURCE_KEY = "desktop_tip_wecom_group_registry";
 const MANUAL_MESSAGE_TITLE_MAX = 80;
 const MANUAL_MESSAGE_BODY_MAX = 1000;
 const MANUAL_MESSAGE_FORBIDDEN_TARGET_FIELDS = [
@@ -118,6 +119,15 @@ function normalizeClientUpdateConfig(value = {}) {
   };
 }
 
+function normalizeWecomGroupRegistryConfig(value = {}) {
+  const config = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    enabled: config.enabled !== undefined ? Boolean(config.enabled) : true,
+    storePath: trimText(config.storePath) || "data/desktop-tip/wecom-groups.json",
+    maxGroups: safeLimit(config.maxGroups, 50, 500)
+  };
+}
+
 function normalizeConfig(moduleConfig = {}) {
   return {
     enabled: moduleConfig.enabled !== undefined ? Boolean(moduleConfig.enabled) : true,
@@ -134,6 +144,7 @@ function normalizeConfig(moduleConfig = {}) {
     openUrl: trimText(moduleConfig.openUrl) || "https://work.weixin.qq.com",
     clientRegistry: normalizeClientRegistryConfig(moduleConfig.clientRegistry),
     clientUpdate: normalizeClientUpdateConfig(moduleConfig.clientUpdate),
+    wecomGroupRegistry: normalizeWecomGroupRegistryConfig(moduleConfig.wecomGroupRegistry),
     productionMaintenance: moduleConfig.productionMaintenance && typeof moduleConfig.productionMaintenance === "object"
       ? moduleConfig.productionMaintenance
       : {}
@@ -156,15 +167,72 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
+function groupRegistryId(chatId) {
+  return `wg_${crypto.createHash("sha256").update(trimText(chatId)).digest("hex").slice(0, 16)}`;
+}
+
+function normalizeGroupDisplayName(value) {
+  return trimText(value).replace(/\s+/g, " ").slice(0, 40);
+}
+
+function readWecomGroupRegistryFile(filePath, fallback, logger, configStorePath) {
+  if (!fs.existsSync(filePath)) {
+    return fallback;
+  }
+  try {
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
+    if (!value || typeof value !== "object" || !Array.isArray(value.groups)) {
+      throw new Error("groups must be an array");
+    }
+    return value;
+  } catch (error) {
+    if (logger && typeof logger.warn === "function") {
+      logger.warn("Desktop tip WeCom group registry is invalid; fallback to empty registry", {
+        sourceKey: WECOM_GROUP_REGISTRY_SOURCE_KEY,
+        storePath: configStorePath,
+        message: error && error.message ? error.message : String(error || "")
+      });
+    }
+    return fallback;
+  }
+}
+
+function compactCommandText(value) {
+  return trimText(value).replace(/\s+/g, "");
+}
+
+function parseWecomGroupBindingCommand(text) {
+  const raw = trimText(text);
+  const compact = compactCommandText(raw);
+  const bindIndex = compact.search(/(?:绑定|设置)M04通知群/i);
+  const unbindIndex = compact.search(/(?:取消绑定|解绑)M04通知群/i);
+  if (bindIndex < 0 && unbindIndex < 0) {
+    return { handled: false };
+  }
+  const action = unbindIndex >= 0 && (bindIndex < 0 || unbindIndex <= bindIndex) ? "unbind" : "bind";
+  const pattern = action === "bind"
+    ? /(?:绑定|设置)\s*M04\s*通知群/i
+    : /(?:取消绑定|解绑)\s*M04\s*通知群/i;
+  const match = raw.match(pattern);
+  const displayName = match ? normalizeGroupDisplayName(raw.slice(match.index + match[0].length)) : "";
+  return {
+    handled: true,
+    action,
+    displayName
+  };
+}
+
 function createDesktopTipModule(options = {}) {
   const logger = options.logger;
   const config = normalizeConfig(options.moduleConfig || {});
   const storeFile = resolveProjectPath(config.storePath);
   const clientRegistryFile = resolveProjectPath(config.clientRegistry.storePath);
+  const wecomGroupRegistryFile = resolveProjectPath(config.wecomGroupRegistry.storePath);
   const updateManifestFile = resolveProjectPath(config.clientUpdate.manifestPath);
   const updatePackageDir = resolveProjectPath(config.clientUpdate.packageDir);
   let state = readJsonFile(storeFile, { events: [] });
   let clientRegistryState = readClientRegistryFile(clientRegistryFile, { clients: [] }, logger, config.clientRegistry.storePath);
+  let wecomGroupRegistryState = readWecomGroupRegistryFile(wecomGroupRegistryFile, { groups: [] }, logger, config.wecomGroupRegistry.storePath);
   let warnedAnonymousAccess = false;
   let warnedClientRegistryLimit = false;
   let lastRegistryPersistAt = "";
@@ -199,6 +267,15 @@ function createDesktopTipModule(options = {}) {
     });
     lastRegistryPersistAt = new Date().toISOString();
     lastRegistryPersistMs = Date.now();
+  }
+
+  function saveWecomGroupRegistry() {
+    writeJsonAtomic(wecomGroupRegistryFile, {
+      version: config.version,
+      sourceKey: WECOM_GROUP_REGISTRY_SOURCE_KEY,
+      updatedAt: new Date().toISOString(),
+      groups: wecomGroupRegistryState.groups
+    });
   }
 
   function maybeWarnClientRegistryLimit() {
@@ -330,6 +407,180 @@ function createDesktopTipModule(options = {}) {
       registeredClientCount: getRegisteredClients().length,
       lastRegistryPersistAt
     };
+  }
+
+  function activeWecomGroups() {
+    return wecomGroupRegistryState.groups
+      .filter((group) => group && group.active !== false && trimText(group.chatId))
+      .map((group) => ({
+        groupId: trimText(group.groupId) || groupRegistryId(group.chatId),
+        displayName: normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(group.chatId)}`,
+        source: "wecom_smart_bot_group_callback",
+        boundAt: trimText(group.boundAt),
+        boundByName: trimText(group.boundByName),
+        hasChatId: Boolean(trimText(group.chatId)),
+        updatedAt: trimText(group.updatedAt)
+      }));
+  }
+
+  function getWecomGroupRegistryStatus() {
+    return {
+      enabled: config.wecomGroupRegistry.enabled,
+      storePath: config.wecomGroupRegistry.storePath,
+      maxGroups: config.wecomGroupRegistry.maxGroups,
+      groupCount: activeWecomGroups().length,
+      groups: activeWecomGroups()
+    };
+  }
+
+  function bindWecomGroupFromCallback(input = {}) {
+    if (!config.wecomGroupRegistry.enabled) {
+      return { ok: false, handled: true, message: "EA 桌面提醒群通知绑定功能未启用" };
+    }
+    const sender = input.sender || {};
+    const chatType = lowerText(sender.chatType);
+    const chatId = trimText(sender.chatId);
+    if (!chatType.includes("group")) {
+      return { ok: false, handled: true, statusCode: 400, message: "请在要接收通知的企业微信群里发送：@1号机器人 绑定M04通知群" };
+    }
+    if (!chatId) {
+      return { ok: false, handled: true, statusCode: 400, message: "企业微信回调缺少群 chatid，无法绑定 M04 通知群" };
+    }
+    const nowIso = new Date().toISOString();
+    const groupId = groupRegistryId(chatId);
+    const requestedName = normalizeGroupDisplayName(input.displayName);
+    const callbackName = normalizeGroupDisplayName(sender.chatName || sender.groupName || sender.name);
+    const displayName = requestedName || callbackName || `M04通知群-${shortHash(chatId)}`;
+    let group = wecomGroupRegistryState.groups.find((item) => trimText(item.groupId) === groupId || lowerText(item.chatId) === lowerText(chatId));
+    const isNew = !group;
+    if (!group) {
+      if (activeWecomGroups().length >= config.wecomGroupRegistry.maxGroups) {
+        throw createHttpError(409, `M04 通知群数量已达到上限 ${config.wecomGroupRegistry.maxGroups}`);
+      }
+      group = {
+        groupId,
+        chatId,
+        displayName,
+        active: true,
+        boundAt: nowIso,
+        boundByUserId: trimText(sender.userId),
+        boundByName: trimText(sender.name),
+        source: "wecom_smart_bot_group_callback"
+      };
+      wecomGroupRegistryState.groups.push(group);
+    } else {
+      group.groupId = groupId;
+      group.chatId = chatId;
+      group.displayName = displayName || normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(chatId)}`;
+      group.active = true;
+      group.updatedAt = nowIso;
+      group.updatedByUserId = trimText(sender.userId);
+      group.updatedByName = trimText(sender.name);
+      if (!group.boundAt) group.boundAt = nowIso;
+      if (!group.boundByUserId) group.boundByUserId = trimText(sender.userId);
+      if (!group.boundByName) group.boundByName = trimText(sender.name);
+    }
+    saveWecomGroupRegistry();
+    if (logger && typeof logger.info === "function") {
+      logger.info("Desktop tip WeCom group bound", {
+        sourceKey: WECOM_GROUP_REGISTRY_SOURCE_KEY,
+        groupId,
+        displayNameLength: group.displayName.length,
+        isNew,
+        operatorUserId: maskLogId(sender.userId),
+        chatId: maskLogId(chatId),
+        groupCount: activeWecomGroups().length
+      });
+    }
+    return {
+      ok: true,
+      handled: true,
+      action: "bind",
+      idempotent: !isNew,
+      group: activeWecomGroups().find((item) => item.groupId === groupId),
+      message: isNew
+        ? `已绑定 M04 通知群：${group.displayName}`
+        : `M04 通知群已绑定，无需重复操作：${group.displayName}`
+    };
+  }
+
+  function unbindWecomGroupFromCallback(input = {}) {
+    const sender = input.sender || {};
+    const chatType = lowerText(sender.chatType);
+    const chatId = trimText(sender.chatId);
+    if (!chatType.includes("group")) {
+      return { ok: false, handled: true, statusCode: 400, message: "请在已绑定的企业微信群里发送：@1号机器人 解绑M04通知群" };
+    }
+    if (!chatId) {
+      return { ok: false, handled: true, statusCode: 400, message: "企业微信回调缺少群 chatid，无法解绑 M04 通知群" };
+    }
+    const group = wecomGroupRegistryState.groups.find((item) => lowerText(item.chatId) === lowerText(chatId));
+    if (!group || group.active === false) {
+      return { ok: true, handled: true, action: "unbind", idempotent: true, message: "当前群未绑定 M04 通知群，无需解绑" };
+    }
+    group.active = false;
+    group.unboundAt = new Date().toISOString();
+    group.unboundByUserId = trimText(sender.userId);
+    group.unboundByName = trimText(sender.name);
+    saveWecomGroupRegistry();
+    if (logger && typeof logger.info === "function") {
+      logger.info("Desktop tip WeCom group unbound", {
+        sourceKey: WECOM_GROUP_REGISTRY_SOURCE_KEY,
+        groupId: trimText(group.groupId),
+        operatorUserId: maskLogId(sender.userId),
+        chatId: maskLogId(chatId),
+        groupCount: activeWecomGroups().length
+      });
+    }
+    return {
+      ok: true,
+      handled: true,
+      action: "unbind",
+      group: {
+        groupId: trimText(group.groupId),
+        displayName: normalizeGroupDisplayName(group.displayName)
+      },
+      message: `已解绑 M04 通知群：${normalizeGroupDisplayName(group.displayName) || "当前群"}`
+    };
+  }
+
+  function captureWecomGroupBindingMessage(message = {}) {
+    const command = parseWecomGroupBindingCommand(message.text);
+    if (!command.handled) {
+      return { handled: false };
+    }
+    if (command.action === "unbind") {
+      return unbindWecomGroupFromCallback({ sender: message.sender || {} });
+    }
+    return bindWecomGroupFromCallback({
+      sender: message.sender || {},
+      displayName: command.displayName
+    });
+  }
+
+  function resolveWecomGroupTargets(targets = []) {
+    const requested = Array.isArray(targets) ? targets : [];
+    const activeById = new Map();
+    for (const group of wecomGroupRegistryState.groups) {
+      if (group && group.active !== false && trimText(group.chatId)) {
+        const groupId = trimText(group.groupId) || groupRegistryId(group.chatId);
+        activeById.set(groupId, group);
+      }
+    }
+    return requested.map((target) => {
+      const groupId = trimText(target && target.groupId);
+      const mentionMode = trimText(target && target.mentionMode) === "all" ? "all" : "none";
+      const group = activeById.get(groupId);
+      if (!group) {
+        throw createHttpError(400, "选择的企业微信群未绑定或已失效，请刷新群列表");
+      }
+      return {
+        groupId,
+        chatId: trimText(group.chatId),
+        displayName: normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(group.chatId)}`,
+        mentionMode
+      };
+    });
   }
 
   function expectedToken() {
@@ -891,6 +1142,7 @@ function createDesktopTipModule(options = {}) {
       requireToken: config.requireToken,
       clientPollSeconds: config.clientPollSeconds,
       clientRegistry: getClientRegistryStatus(),
+      wecomGroupRegistry: getWecomGroupRegistryStatus(),
       clientUpdate: getClientUpdateStatus(),
       productionMaintenance: productionMaintenance.getStatus()
     };
@@ -911,6 +1163,9 @@ function createDesktopTipModule(options = {}) {
     getRegisteredUserIds,
     getRegisteredClients,
     getClientRegistryStatus,
+    getWecomGroupRegistryStatus,
+    resolveWecomGroupTargets,
+    captureWecomGroupBindingMessage,
     getClientUpdateManifest,
     getClientUpdatePackage,
     getClientUpdateStatus,

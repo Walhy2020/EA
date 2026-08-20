@@ -670,7 +670,7 @@
       <section id="tab-desktop-tip" class="tab-panel">
         <div class="tab-title-line">
           <h2>EA 桌面提醒</h2>
-          <span id="desktopTipVersionBadge" class="badge">v0.3.1</span>
+          <span id="desktopTipVersionBadge" class="badge">v0.3.2</span>
         </div>
         <div class="settings-subsection">
           <div class="subsection-title">
@@ -719,6 +719,26 @@
               <span>消息内容</span>
               <textarea id="desktopTipManualBodyInput" rows="4" maxlength="1000" autocomplete="off" placeholder="请输入要发送到 EA 桌面提醒客户端的测试消息"></textarea>
             </label>
+            <div class="settings-subsection compact-subsection">
+              <label class="toggle-line">
+                <input id="desktopTipManualWecomEnabledInput" type="checkbox">
+                <span>同时发送企业微信群</span>
+              </label>
+              <div class="field-grid">
+                <label>
+                  <span>已绑定群（可多选）</span>
+                  <select id="desktopTipManualWecomGroupSelect" multiple size="4" disabled></select>
+                </label>
+                <label>
+                  <span>群通知方式</span>
+                  <select id="desktopTipManualWecomMentionModeInput" disabled>
+                    <option value="none">普通通知</option>
+                    <option value="all">@所有人（灰度）</option>
+                  </select>
+                </label>
+              </div>
+              <p id="desktopTipManualWecomStatus" class="muted-note">默认不发送群通知；如需使用，请先在目标群发送：@1号机器人 绑定M04通知群。@所有人会加入 @all 发送参数，强提醒效果以企业微信智能机器人支持为准。</p>
+            </div>
             <div class="form-actions">
               <button id="desktopTipManualSubmitBtn" type="submit" disabled>发送测试消息</button>
               <span id="desktopTipManualStatus" class="save-status">请先读取配置并确认已有登记客户端</span>

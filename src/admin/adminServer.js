@@ -99,6 +99,17 @@ function requestDesktopTipToken(req, url, body = {}) {
   ).trim();
 }
 
+function trimText(value) {
+  return String(value || "").trim();
+}
+
+function maskLogId(value) {
+  const text = trimText(value);
+  if (!text) return "";
+  if (text.length <= 4) return "***";
+  return `${text.slice(0, 2)}***${text.slice(-2)}`;
+}
+
 function serveStatic(req, res) {
   const url = new URL(req.url, "http://localhost");
   const staticAliases = {
@@ -159,6 +170,132 @@ function createAdminServer(options) {
   const logger = options.logger;
   let server = null;
   let healthServer = null;
+
+  function normalizeManualWecomGroupOptions(body = {}) {
+    const raw = body.wecomGroups && typeof body.wecomGroups === "object" && !Array.isArray(body.wecomGroups)
+      ? body.wecomGroups
+      : {};
+    const enabled = raw.enabled === true;
+    const targets = Array.isArray(raw.targets) ? raw.targets : [];
+    return {
+      enabled,
+      targets: targets.map((target) => ({
+        groupId: trimText(target && target.groupId),
+        mentionMode: trimText(target && target.mentionMode) === "all" ? "all" : "none"
+      })).filter((target) => target.groupId)
+    };
+  }
+
+  function manualWecomGroupMessage({ title, body, operatorName, mentionMode }) {
+    const lines = [];
+    if (mentionMode === "all") {
+      lines.push("@所有人");
+    }
+    lines.push(`**${trimText(title) || "EA桌面提醒"}**`);
+    lines.push("");
+    lines.push(trimText(body));
+    if (operatorName) {
+      lines.push("");
+      lines.push(`发送人：${operatorName}`);
+    }
+    return lines.join("\n");
+  }
+
+  function disabledManualWecomGroupResult() {
+    return {
+      enabled: false,
+      requestedCount: 0,
+      successCount: 0,
+      failedCount: 0,
+      results: []
+    };
+  }
+
+  function prepareDesktopTipManualWecomGroups(body = {}) {
+    const options = normalizeManualWecomGroupOptions(body);
+    if (!options.enabled) {
+      return disabledManualWecomGroupResult();
+    }
+    if (options.targets.length <= 0) {
+      const error = new Error("勾选企业微信群通知后至少选择 1 个已绑定群");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!modules.desktopTip || typeof modules.desktopTip.resolveWecomGroupTargets !== "function") {
+      const error = new Error("EA 桌面提醒群通知模块未启用");
+      error.statusCode = 503;
+      throw error;
+    }
+    const targets = modules.desktopTip.resolveWecomGroupTargets(options.targets);
+    return {
+      enabled: true,
+      requestedCount: targets.length,
+      targets
+    };
+  }
+
+  async function sendDesktopTipManualWecomGroups({ body, identity, desktopResult, prepared }) {
+    const groupPlan = prepared || prepareDesktopTipManualWecomGroups(body);
+    if (!groupPlan.enabled) {
+      return disabledManualWecomGroupResult();
+    }
+    const targets = groupPlan.targets || [];
+    const results = [];
+    for (const target of targets) {
+      try {
+        if (!robotServer || typeof robotServer.sendMarkdownMessage !== "function") {
+          throw new Error("1号机器人主动群发送能力未启用");
+        }
+        const ack = await robotServer.sendMarkdownMessage(
+          target.chatId,
+          manualWecomGroupMessage({
+            title: body.title,
+            body: body.body || body.content,
+            operatorName: identity.name || "",
+            mentionMode: target.mentionMode
+          }),
+          { mentionAll: target.mentionMode === "all" }
+        );
+        const ok = !(ack && ack.errcode);
+        results.push({
+          groupId: target.groupId,
+          displayName: target.displayName,
+          mentionMode: target.mentionMode,
+          ok,
+          errcode: ack && ack.errcode,
+          errmsg: trimText(ack && ack.errmsg)
+        });
+      } catch (error) {
+        results.push({
+          groupId: target.groupId,
+          displayName: target.displayName,
+          mentionMode: target.mentionMode,
+          ok: false,
+          message: error && error.message ? error.message : String(error || "")
+        });
+      }
+    }
+    const successCount = results.filter((item) => item.ok).length;
+    const failedCount = results.length - successCount;
+    if (logger && typeof logger.info === "function") {
+      logger.info("Desktop tip manual WeCom group notification finished", {
+        sourceKey: "admin_manual_message",
+        batchId: desktopResult && desktopResult.batchId ? desktopResult.batchId : "",
+        operatorUserId: maskLogId(identity && identity.userId),
+        requestedCount: targets.length,
+        successCount,
+        failedCount,
+        mentionAllCount: targets.filter((item) => item.mentionMode === "all").length
+      });
+    }
+    return {
+      enabled: true,
+      requestedCount: targets.length,
+      successCount,
+      failedCount,
+      results
+    };
+  }
 
   function httpsServerOptions() {
     const settings = config.app && config.app.server && config.app.server.https;
@@ -606,6 +743,24 @@ function createAdminServer(options) {
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/desktop-tip/wecom-groups") {
+      const identity = requireDemandH5Identity(req, res, url.pathname);
+      if (!identity) return true;
+      const result = modules.desktopTip && typeof modules.desktopTip.getWecomGroupRegistryStatus === "function"
+        ? modules.desktopTip.getWecomGroupRegistryStatus()
+        : { enabled: false, groups: [], groupCount: 0 };
+      sendJson(res, 200, {
+        ok: true,
+        wecomGroups: result,
+        identity: {
+          userId: identity.userId,
+          name: identity.name || "",
+          source: "signed_session"
+        }
+      });
+      return true;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/desktop-tip/client-update/manifest") {
       const result = modules.desktopTip && typeof modules.desktopTip.getClientUpdateManifest === "function"
         ? modules.desktopTip.getClientUpdateManifest()
@@ -654,9 +809,13 @@ function createAdminServer(options) {
       const desktopTipStatus = modules.desktopTip && typeof modules.desktopTip.getStatus === "function"
         ? modules.desktopTip.getStatus()
         : {};
+      const wecomGroups = modules.desktopTip && typeof modules.desktopTip.getWecomGroupRegistryStatus === "function"
+        ? modules.desktopTip.getWecomGroupRegistryStatus()
+        : { enabled: false, groups: [], groupCount: 0 };
       sendJson(res, result.ok ? 200 : 503, {
         ...result,
         clientUpdate: desktopTipStatus.clientUpdate || {},
+        wecomGroups,
         identity: {
           userId: identity.userId,
           name: identity.name || "",
@@ -696,6 +855,7 @@ function createAdminServer(options) {
         });
         return true;
       }
+      const preparedWecomGroups = prepareDesktopTipManualWecomGroups(body);
       const result = modules.desktopTip && typeof modules.desktopTip.createManualMessage === "function"
         ? modules.desktopTip.createManualMessage({
           title: body.title,
@@ -704,6 +864,12 @@ function createAdminServer(options) {
           operatorName: identity.name || ""
         })
         : { ok: false, message: "EA 桌面提醒普通消息测试模块未启用" };
+      const wecomGroups = await sendDesktopTipManualWecomGroups({
+        body,
+        identity,
+        desktopResult: result,
+        prepared: preparedWecomGroups
+      });
       logger.info("Desktop tip manual message API requested", {
         sourceKey: "admin_manual_message",
         batchId: result.batchId || "",
@@ -714,9 +880,15 @@ function createAdminServer(options) {
         bodyLength: String(body.body || body.content || "").trim().length,
         queued: Number(result.queuedCount || 0),
         failed: Number(result.failedCount || 0),
+        wecomGroupEnabled: Boolean(wecomGroups.enabled),
+        wecomGroupSuccess: Number(wecomGroups.successCount || 0),
+        wecomGroupFailed: Number(wecomGroups.failedCount || 0),
         ok: Boolean(result.ok)
       });
-      sendJson(res, result.ok ? 200 : 503, result);
+      sendJson(res, result.ok ? 200 : 503, {
+        ...result,
+        wecomGroups
+      });
       return true;
     }
 

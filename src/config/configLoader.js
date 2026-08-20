@@ -204,7 +204,7 @@ function normalizeConfig(config) {
     enabled: true,
     name: "EA 桌面提醒",
     source: "desktop-tip",
-    version: "0.3.1",
+    version: "0.3.2",
     storePath: "data/desktop-tip/events.json",
     ttlMinutes: 4320,
     maxStoredEvents: 500,
@@ -223,6 +223,11 @@ function normalizeConfig(config) {
       manifestPath: "tools/desktop-tip/releases/latest.json",
       packageDir: "tools/desktop-tip/releases",
       packageUrl: "/api/desktop-tip/client-update/package"
+    },
+    wecomGroupRegistry: {
+      enabled: true,
+      storePath: "data/desktop-tip/wecom-groups.json",
+      maxGroups: 50
     },
     productionMaintenance: {
       enabled: true,
