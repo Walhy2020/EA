@@ -91,6 +91,42 @@
     "requiredFields": {
       "enabled": false,
       "cumulative": true,
+      "fieldFilters": [
+        {
+          "title": "验收与待上线阶段不要求UI和程序交付日期",
+          "when": {
+            "statuses": [
+              "内网验收中",
+              "待上线",
+              "内网测试中",
+              "测试2验收中",
+              "测试2测试中",
+              "测试1验收/测试中"
+            ]
+          },
+          "fields": [
+            "UI制作交付日期",
+            "UI监修完成日期",
+            "程序开发交付日期"
+          ]
+        },
+        {
+          "title": "UI进度完成阶段不要求UI交付日期",
+          "when": {
+            "fieldValues": {
+              "UI进度": [
+                "已监修",
+                "已提交",
+                "制作完成"
+              ]
+            }
+          },
+          "fields": [
+            "UI制作交付日期",
+            "UI监修完成日期"
+          ]
+        }
+      ],
       "items": []
     }
   },
