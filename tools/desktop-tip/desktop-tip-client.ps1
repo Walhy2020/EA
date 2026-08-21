@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Script:Version = "0.5.0"
+$Script:Version = "0.5.1"
 $Script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:ConfigPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $Script:Root "config\desktop-tip-client.config.json" }
 $Script:LogDir = Join-Path $Script:Root "logs"
@@ -54,6 +54,50 @@ function Write-TipLog {
 function TextFromCodes {
   param([int[]]$Codes)
   return -join ($Codes | ForEach-Object { [char]$_ })
+}
+
+function New-DesktopTipApplicationIcon {
+  if (-not ("EADesktopTip.NativeMethods" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+namespace EADesktopTip {
+  public static class NativeMethods {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr handle);
+  }
+}
+"@
+  }
+
+  $bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $backgroundBrush = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml("#1677ff"))
+  $textBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+  $font = New-Object System.Drawing.Font("Arial", 11, [System.Drawing.FontStyle]::Bold)
+  $format = New-Object System.Drawing.StringFormat
+  $format.Alignment = [System.Drawing.StringAlignment]::Center
+  $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+  $handle = [IntPtr]::Zero
+  try {
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $graphics.FillRectangle($backgroundBrush, 0, 0, 32, 32)
+    $rect = New-Object System.Drawing.RectangleF(0, 0, 32, 32)
+    $graphics.DrawString("EA", $font, $textBrush, $rect, $format)
+    $handle = $bitmap.GetHicon()
+    return ([System.Drawing.Icon]::FromHandle($handle).Clone())
+  } finally {
+    if ($handle -ne [IntPtr]::Zero) {
+      [void][EADesktopTip.NativeMethods]::DestroyIcon($handle)
+    }
+    $format.Dispose()
+    $font.Dispose()
+    $textBrush.Dispose()
+    $backgroundBrush.Dispose()
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
 }
 
 function Mask-LogId {
@@ -1061,6 +1105,14 @@ function Run-SelfTest {
   Ensure-ClientId
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
+  $testIcon = New-DesktopTipApplicationIcon
+  try {
+    if ($testIcon.Width -ne 32 -or $testIcon.Height -ne 32) {
+      throw "Tray icon self test failed"
+    }
+  } finally {
+    $testIcon.Dispose()
+  }
   $testFont = New-Object System.Drawing.Font("Microsoft YaHei UI", 12)
   $testSize = New-Object System.Drawing.Size(340, 10000)
   $testFlags = [System.Windows.Forms.TextFormatFlags]::WordBreak -bor [System.Windows.Forms.TextFormatFlags]::TextBoxControl
@@ -1076,6 +1128,7 @@ function Run-SelfTest {
     configPath = $Script:ConfigPath
     clientId = $Script:ClientId
     bodyScrollMode = "native_on_demand"
+    trayIconStyle = "blue_ea"
   }
   Write-Output ((TextFromCodes @(69,65,32,26700,38754,25552,37266,32,118)) + $Script:Version + (TextFromCodes @(32,115,101,108,102,32,116,101,115,116,32,112,97,115,115,101,100,65292,27491,24335,26381,20572,26381,26356,26032,38754,26495,20013,25991,33258,26816,36890,36807)))
 }
@@ -1097,9 +1150,11 @@ function Start-TipWindow {
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
   [System.Windows.Forms.Application]::EnableVisualStyles()
+  $applicationIcon = New-DesktopTipApplicationIcon
 
   $form = New-Object System.Windows.Forms.Form
   $form.Text = (TextFromCodes @(69,65,32,26700,38754,25552,37266,32,118)) + $Script:Version
+  $form.Icon = $applicationIcon
   $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
   $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
   $form.TopMost = $true
@@ -1219,6 +1274,12 @@ function Start-TipWindow {
     $autoStartItem.Checked = Test-DesktopTipAutoStart
   })
 
+  $trayIcon = New-Object System.Windows.Forms.NotifyIcon
+  $trayIcon.Icon = $applicationIcon
+  $trayIcon.Text = (TextFromCodes @(69,65,32,26700,38754,25552,37266,32,86)) + $Script:Version
+  $trayIcon.ContextMenuStrip = $exitMenu
+  $trayIcon.Visible = $true
+
   function Move-ToBottomRight {
     param([int]$Width, [int]$Height)
     $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
@@ -1331,6 +1392,13 @@ function Start-TipWindow {
     }
   }
 
+  $trayIcon.Add_MouseClick({
+    param($sender, $eventArgs)
+    if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+      Wake-DesktopTipWindow
+    }
+  })
+
   $logoClick = {
     if ($Script:CurrentTip) {
       Set-Expanded -Tip $Script:CurrentTip
@@ -1405,11 +1473,35 @@ function Start-TipWindow {
   })
   $timer.Start()
 
+  $form.Add_FormClosed({
+    try {
+      $timer.Stop()
+      $timer.Dispose()
+    } catch {}
+    try {
+      $trayIcon.Visible = $false
+      $trayIcon.Dispose()
+    } catch {}
+    try {
+      $applicationIcon.Dispose()
+    } catch {}
+    Write-TipLog "INFO" "Desktop tip tray icon released" @{
+      version = $Script:Version
+    }
+  })
+
+  Write-TipLog "INFO" "Desktop tip tray icon registered" @{
+    version = $Script:Version
+    style = "blue_ea"
+    contextMenu = $true
+  }
+
   Write-TipLog "INFO" "EA desktop tip started" @{
     version = $Script:Version
     serverBaseUrl = [string]$Script:Config.serverBaseUrl
     clientId = Mask-LogId ([string]$Script:ClientId)
     pollSeconds = [int]$Script:Config.pollSeconds
+    trayIcon = $true
   }
 
   Set-Collapsed

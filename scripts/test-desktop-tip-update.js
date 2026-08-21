@@ -519,14 +519,14 @@ async function runLauncherExeTests() {
 function runReleaseArtifactTests() {
   const root = path.join(__dirname, "..", "tools", "desktop-tip");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "releases", "latest.json"), "utf8"));
-  assert.equal(manifest.version, "0.5.0");
-  assert.equal(manifest.appVersion, "0.6.71");
+  assert.equal(manifest.version, "0.5.1");
+  assert.equal(manifest.appVersion, "0.6.72");
   const updatePath = path.join(root, "releases", manifest.packageFile);
   assert.equal(fs.statSync(updatePath).size, manifest.size);
   assert.equal(sha256(updatePath), manifest.sha256);
   const updateEntries = readStoredZipEntries(updatePath);
   assert.ok(updateEntries.has("desktop-tip-client.ps1"));
-  assert.equal(updateEntries.has("EA桌面提醒.exe"), false, "v0.5.0 update ZIP must stay compatible with the v0.4.2 updater whitelist");
+  assert.equal(updateEntries.has("EA桌面提醒.exe"), false, "v0.5.1 update ZIP must stay compatible with the v0.4.2 updater whitelist");
   const releaseClient = updateEntries.get("desktop-tip-client.ps1").toString("utf8");
   assert.doesNotMatch(releaseClient, /__EA_DESKTOP_TIP_LAUNCHER_(BASE64|SHA256)__/, "release client must embed the verified EXE payload");
   const base64Match = releaseClient.match(/\$Script:LauncherPayloadBase64 = "([A-Za-z0-9+/=]+)"/);
@@ -536,7 +536,7 @@ function runReleaseArtifactTests() {
   assert.equal(crypto.createHash("sha256").update(launcherBuffer).digest("hex"), shaMatch[1]);
   assert.equal(crypto.createHash("sha256").update(launcherBuffer).digest("hex"), sha256(path.join(root, "EA桌面提醒.exe")));
 
-  const installPath = path.join(root, "OutPackage", "EA桌面提醒_v0.5.0_首次安装.zip");
+  const installPath = path.join(root, "OutPackage", "EA桌面提醒_v0.5.1_首次安装.zip");
   const installEntries = readStoredZipEntries(installPath);
   assert.ok(installEntries.has("EA桌面提醒.exe"), "first-install ZIP must contain the EXE entrypoint");
   assert.ok(installEntries.has("config/desktop-tip-client.config.json"));
@@ -587,6 +587,15 @@ function runClientSourceTests() {
   assert.match(source, /Ensure-DesktopTipLauncher/, "client must materialize the verified EXE during online migration");
   assert.match(source, /Set-DesktopTipAutoStart/, "client must expose a Windows startup toggle");
   assert.match(source, /autostart-preference\.txt/, "client must persist an explicit startup preference");
+  assert.match(source, /function New-DesktopTipApplicationIcon/, "client must build the blue EA application icon");
+  assert.match(source, /New-Object System\.Windows\.Forms\.NotifyIcon/, "client must register a Windows notification-area icon");
+  assert.match(source, /\$trayIcon\.ContextMenuStrip = \$exitMenu/, "tray icon must reuse the desktop tip context menu");
+  assert.match(source, /\$trayIcon\.Visible = \$true/, "tray icon must be visible while M04 is running");
+  assert.match(source, /\$trayIcon\.Visible = \$false/, "tray icon must be hidden during client shutdown");
+  assert.match(source, /Desktop tip tray icon registered/, "client must log tray icon registration");
+  assert.match(source, /Desktop tip tray icon released/, "client must log tray icon cleanup");
+  assert.match(source, /#1677ff/, "tray icon must use the existing EA blue background");
+  assert.match(source, /DrawString\("EA"/, "tray icon must render the EA label");
   assert.match(source, /if \(\$SingleInstanceProbe\)/, "single instance probe must allow automated tests without GUI");
   assert.match(source, /if \(\$SelfCleanOldInstancesTest\)/, "old-instance cleanup test hook must not trigger real UI");
   assert.match(source, /if \(\$LauncherMigrationTest\)/, "launcher migration must be independently testable without GUI or startup changes");
@@ -619,6 +628,10 @@ function runClientSourceTests() {
   assert.match(launcherSource, /SpecialFolder\.Startup/, "desktop tip EXE must enable current-user startup by default");
   assert.match(launcherSource, /autostart-preference\.txt/, "desktop tip EXE must honor the saved startup preference");
   assert.doesNotMatch(launcherSource, /src[\\/]main\.js|39200|Restart EA/, "M04 EXE must not manage the EA server");
+  const launcherBuildScript = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "build-desktop-tip-launcher.ps1"), "utf8");
+  assert.match(launcherBuildScript, /Copy-Item -LiteralPath \$asciiOutputPath -Destination \$outputPath -Force/, "launcher build must overwrite an existing EXE on Windows PowerShell 5");
+  assert.match(launcherBuildScript, /Remove-Item -LiteralPath \$asciiOutputPath -Force/, "launcher build must remove its temporary EXE");
+  assert.doesNotMatch(launcherBuildScript, /Move-Item -LiteralPath \$asciiOutputPath -Destination \$outputPath -Force/, "launcher build must not rely on Move-Item -Force overwrite semantics");
 }
 
 async function main() {

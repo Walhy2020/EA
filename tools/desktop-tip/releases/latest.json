@@ -1,13 +1,13 @@
 {
-  "version": "0.5.0",
-  "appVersion": "0.6.71",
-  "publishedAt": "2026-08-21T06:26:48.519Z",
+  "version": "0.5.1",
+  "appVersion": "0.6.72",
+  "publishedAt": "2026-08-21T07:16:45.108Z",
   "packageUrl": "/api/desktop-tip/client-update/package",
-  "packageFile": "EA桌面提醒_client_v0.5.0.zip",
-  "sha256": "d24772dd905d3a38aedfb33f8a232c64a5c3cffab54b9264feea9cd6f17067e1",
-  "size": 90043,
+  "packageFile": "EA桌面提醒_client_v0.5.1.zip",
+  "sha256": "ff6213cfb444df03b5774d0c5490689965be6e57481b03dd14a09630549f1508",
+  "size": 93257,
   "minimumSupportedVersion": "0.3.0",
   "releaseNotes": [
-    "桌面提醒现在可直接通过 EXE 启动，并默认随系统启动。"
+    "桌面右下角新增蓝色 EA 小图标，方便确认软件正在运行。"
   ]
 }

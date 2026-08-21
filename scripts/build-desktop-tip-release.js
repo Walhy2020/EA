@@ -12,7 +12,7 @@ const outDir = path.join(toolDir, "OutPackage");
 const releaseDir = path.join(toolDir, "releases");
 const version = process.argv.find((item) => item.startsWith("--version="))?.slice("--version=".length)
   || process.env.DESKTOP_TIP_CLIENT_VERSION
-  || "0.5.0";
+  || "0.5.1";
 const launcherFileName = "EA桌面提醒.exe";
 
 function crc32Buffer(buffer) {
@@ -207,7 +207,7 @@ function main() {
     size,
     minimumSupportedVersion: "0.3.0",
     releaseNotes: [
-      "桌面提醒现在可直接通过 EXE 启动，并默认随系统启动。"
+      "桌面右下角新增蓝色 EA 小图标，方便确认软件正在运行。"
     ]
   };
   fs.writeFileSync(path.join(releaseDir, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

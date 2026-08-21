@@ -12,14 +12,14 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("EA desktop notification launcher")]
 [assembly: AssemblyCompany("EazyGame")]
 [assembly: AssemblyProduct("EA Desktop Tip")]
-[assembly: AssemblyVersion("0.5.0.0")]
-[assembly: AssemblyFileVersion("0.5.0.0")]
+[assembly: AssemblyVersion("0.5.1.0")]
+[assembly: AssemblyFileVersion("0.5.1.0")]
 
 namespace EazyGame.DesktopTipLauncher
 {
     internal static class Program
     {
-        internal const string Version = "0.5.0";
+        internal const string Version = "0.5.1";
         private const string ClientScriptName = "desktop-tip-client.ps1";
 
         [STAThread]

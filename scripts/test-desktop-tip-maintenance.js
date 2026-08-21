@@ -1177,7 +1177,7 @@ async function main() {
   const psClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const psPackageClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), "utf8");
   for (const content of [psClient, psPackageClient]) {
-    assert.match(content, /\$Script:Version = "0\.5\.0"/, "client version must be v0.5.0");
+    assert.match(content, /\$Script:Version = "0\.5\.1"/, "client version must be v0.5.1");
     assert.match(content, /Initialize-SingleInstance/, "client must enforce same-install single instance");
     assert.match(content, /Local\\EADesktopTip_/, "client single instance lock must be per-user Windows named mutex");
     assert.match(content, /Duplicate desktop tip client instance rejected/, "duplicate launch must exit instead of creating another UI");

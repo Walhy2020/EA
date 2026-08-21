@@ -46,13 +46,14 @@ if ($LASTEXITCODE -ne 0) {
   throw "Desktop tip launcher compilation failed with exit code $LASTEXITCODE."
 }
 
-Move-Item -LiteralPath $asciiOutputPath -Destination $outputPath -Force
+Copy-Item -LiteralPath $asciiOutputPath -Destination $outputPath -Force
+Remove-Item -LiteralPath $asciiOutputPath -Force
 Copy-Item -LiteralPath $outputPath -Destination $outPackagePath -Force
 
 $item = Get-Item -LiteralPath $outputPath
 [pscustomobject]@{
   ok = $true
-  version = "0.5.0"
+  version = "0.5.1"
   configuration = $Configuration
   output = $item.FullName
   outPackage = $outPackagePath
