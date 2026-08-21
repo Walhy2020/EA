@@ -33,15 +33,10 @@ src\modules\rank\embedded-wx-mini-rank-monitor
 
 ## 启动
 
-双击无控制台托盘启动器：
-
-```text
-tools\ea-launcher\OutPackage\EA.exe
+```powershell
+cd E:\Study\AI2006\ljj_code\eazygame-integrated-assistant
+node src\main.js
 ```
-
-`EA.exe` 默认随当前用户登录启动，自动避免重复运行，每 30 秒检查一次 EA；EA 异常退出时会在后台重新启动。右键系统托盘图标可以打开管理后台、查看状态、重启 EA、关闭开机自动启动或停止 EA。
-
-开发调试时仍可在仓库根目录手动执行 `node src\main.js`，但该方式会保留控制台，不作为正式启动入口。
 
 默认管理台：
 
