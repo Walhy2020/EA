@@ -112,6 +112,17 @@ function stopChild(child) {
   }
 }
 
+async function waitForFile(filePath, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (fs.existsSync(filePath)) {
+      return true;
+    }
+    await delay(100);
+  }
+  return false;
+}
+
 function createModuleWithRelease(root, releaseDir, manifestPath) {
   return createDesktopTipModule({
     logger: { info() {}, warn() {}, error() {} },
@@ -318,7 +329,7 @@ function runUpdaterTests() {
     "-MainScript", restartScript,
     "-ExpectedSha256", "0".repeat(64),
     "-ExpectedSize", String(fs.statSync(okZip).size),
-    "-ExpectedVersion", "0.4.1"
+    "-ExpectedVersion", "0.4.2"
   ], { encoding: "utf8" });
   assert.notEqual(badHash.status, 0, "hash mismatch must fail safely");
   assert.equal(fs.readFileSync(path.join(installDir, "desktop-tip-client.ps1"), "utf8"), before);
@@ -400,8 +411,48 @@ async function runClientSingleInstanceAndCleanupTests() {
   assert.doesNotMatch(logText, /notepad/, "cleanup must not target non-PowerShell processes");
 }
 
+async function runLauncherBatTests() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const root = tempRoot("ea-desktop-tip-launcher-");
+  const launcherPath = path.join(root, "start.bat");
+  const markerPath = path.join(root, "client-started.txt");
+  const pidPath = path.join(root, "client-pid.txt");
+  fs.copyFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "启动EA右下角提醒.bat"), launcherPath);
+  writeFile(path.join(root, "desktop-tip-client.ps1"), [
+    `Set-Content -Path '${pidPath.replace(/'/g, "''")}' -Value $PID -Encoding UTF8`,
+    `Set-Content -Path '${markerPath.replace(/'/g, "''")}' -Value started -Encoding UTF8`,
+    "Start-Sleep -Seconds 10"
+  ].join("\n"));
+  const startedAt = Date.now();
+  const result = childProcess.spawnSync("cmd.exe", ["/c", launcherPath], {
+    cwd: root,
+    windowsHide: true,
+    encoding: "utf8"
+  });
+  const elapsedMs = Date.now() - startedAt;
+  try {
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.ok(elapsedMs < 2000, `launcher BAT must exit quickly, elapsedMs=${elapsedMs}`);
+    assert.equal(await waitForFile(markerPath), true, "hidden PowerShell client must continue running after BAT exits");
+  } finally {
+    if (fs.existsSync(pidPath)) {
+      const pid = Number(fs.readFileSync(pidPath, "utf8").trim());
+      if (Number.isFinite(pid) && pid > 0) {
+        childProcess.spawnSync("powershell", ["-NoProfile", "-Command", `Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`], {
+          windowsHide: true,
+          stdio: "ignore"
+        });
+      }
+    }
+  }
+}
+
 function runClientSourceTests() {
   const source = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
+  const launcher = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "启动EA右下角提醒.bat"), "utf8");
+  const packageLauncher = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "启动EA右下角提醒.bat"), "utf8");
   assert.match(source, /function Compare-Version/, "client must include semver compare");
   assert.match(source, /Check-ClientUpdate/, "client must include update check");
   assert.match(source, /Start-ClientUpdate/, "client must include update handoff");
@@ -428,9 +479,16 @@ function runClientSourceTests() {
   assert.match(updater, /Restore-Backup/, "updater must restore backup on failure");
   assert.match(updater, /Stop-OtherDesktopTipClientInstances/, "updater must stop same-path old client instances for future updates");
   assert.match(updater, /Test-CommandLineTargetsMainScript/, "updater must match exact client script path");
+  assert.match(updater, /function Start-DesktopTipClientHidden/, "updater must restart the client through a hidden launcher helper");
+  assert.match(updater, /"-WindowStyle", "Hidden"/, "updater restart arguments must hide PowerShell");
+  assert.doesNotMatch(updater, /Start-Process -FilePath \$restartTarget/, "updater must not restart through a visible BAT/cmd window");
   assert.match(updater, /System\.Management\.ManagementObjectSearcher/, "updater must fallback to System.Management Win32_Process command line reader");
   assert.doesNotMatch(updater, /WMIC\.exe|wmic/i, "updater must not use unreliable wmic fallback");
   assert.match(updater, /\$_.ProcessId -ne \$PID/, "updater cleanup must not stop itself");
+  for (const content of [launcher, packageLauncher]) {
+    assert.match(content, /Start-Process -FilePath 'powershell\.exe'.*'-WindowStyle','Hidden'.*desktop-tip-client\.ps1/im, "launcher BAT must start the client hidden through a short helper process");
+    assert.doesNotMatch(content, /^powershell\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File/im, "launcher BAT must not block on foreground PowerShell");
+  }
 }
 
 async function main() {
@@ -438,6 +496,7 @@ async function main() {
   runManifestValidationTests();
   runUpdaterTests();
   await runClientSingleInstanceAndCleanupTests();
+  await runLauncherBatTests();
   await runServerEndpointTests();
   console.log("Desktop tip update tests passed");
 }

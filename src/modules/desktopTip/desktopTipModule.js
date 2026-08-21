@@ -6,7 +6,7 @@ const path = require("path");
 const { resolveProjectPath } = require("../../utils/paths");
 const { createProductionMaintenanceManager } = require("./productionMaintenance");
 
-const DEFAULT_VERSION = "0.4.1";
+const DEFAULT_VERSION = "0.4.2";
 const TERMINAL_ACTIONS = new Set(["dismissed", "opened", "done"]);
 const MANUAL_MESSAGE_SOURCE_KEY = "admin_manual_message";
 const CLIENT_MANUAL_MESSAGE_SOURCE_KEY = "client_manual_message";

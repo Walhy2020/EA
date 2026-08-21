@@ -1,13 +1,13 @@
 {
-  "version": "0.4.1",
-  "appVersion": "0.6.67",
-  "publishedAt": "2026-08-21T00:46:49.083Z",
+  "version": "0.4.2",
+  "appVersion": "0.6.68",
+  "publishedAt": "2026-08-21T01:05:49.890Z",
   "packageUrl": "/api/desktop-tip/client-update/package",
-  "packageFile": "EA桌面提醒_client_v0.4.1.zip",
-  "sha256": "00c2ee5fd96e0a59015dbe085d5e142ad8fa4ca1d15639df8d94b04255b8c352",
-  "size": 66069,
+  "packageFile": "EA桌面提醒_client_v0.4.2.zip",
+  "sha256": "4f582e9807ba92644f52d00ecb15654ed81197224e6f2f47c7d5ff391c361cbd",
+  "size": 67306,
   "minimumSupportedVersion": "0.3.0",
   "releaseNotes": [
-    "修复重复出现多个更新提醒的问题。"
+    "优化软件启动体验。"
   ]
 }

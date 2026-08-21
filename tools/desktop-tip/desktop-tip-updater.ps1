@@ -168,6 +168,20 @@ function Stop-OtherDesktopTipClientInstances {
   return $stopped
 }
 
+function Start-DesktopTipClientHidden {
+  $mainScriptPath = if ($MainScript) { $MainScript } else { Join-Path $InstallDir "desktop-tip-client.ps1" }
+  $mainScriptPath = Assert-WithinDir -BaseDir $InstallDir -TargetPath $mainScriptPath
+  if (-not (Test-Path -LiteralPath $mainScriptPath)) {
+    throw "desktop tip client script does not exist: $mainScriptPath"
+  }
+  Start-Process -FilePath "powershell.exe" -ArgumentList @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-WindowStyle", "Hidden",
+    "-File", $mainScriptPath
+  ) -WorkingDirectory $InstallDir -WindowStyle Hidden
+}
+
 try {
   $InstallDir = Assert-WithinDir -BaseDir $InstallDir -TargetPath $InstallDir
   $PackagePath = [System.IO.Path]::GetFullPath($PackagePath)
@@ -238,14 +252,11 @@ try {
     fileCount = $files.Count
   }
 
-  $restartTarget = if ($LauncherPath -and (Test-Path -LiteralPath $LauncherPath)) { $LauncherPath } else { $MainScript }
-  if ($restartTarget.EndsWith(".bat", [System.StringComparison]::OrdinalIgnoreCase)) {
-    Start-Process -FilePath $restartTarget -WorkingDirectory $InstallDir
-  } else {
-    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restartTarget) -WorkingDirectory $InstallDir -WindowStyle Hidden
-  }
+  Start-DesktopTipClientHidden
   Write-UpdateLog "INFO" "Client restarted after update" @{
-    target = [System.IO.Path]::GetFileName($restartTarget)
+    target = [System.IO.Path]::GetFileName($MainScript)
+    launcher = if ($LauncherPath) { [System.IO.Path]::GetFileName($LauncherPath) } else { "" }
+    hidden = $true
   }
 } catch {
   Write-UpdateLog "ERROR" "Client update failed" @{

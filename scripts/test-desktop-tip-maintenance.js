@@ -56,7 +56,7 @@ function createModule(root, overrides = {}) {
     moduleConfig: {
       enabled: true,
       name: "EA 桌面提醒",
-      version: "0.4.1",
+      version: "0.4.2",
       storePath: tempFile(root, "events.json"),
       ttlMinutes: 240,
       clientRegistry: {
@@ -1100,7 +1100,7 @@ async function main() {
   const psClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const psPackageClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), "utf8");
   for (const content of [psClient, psPackageClient]) {
-    assert.match(content, /\$Script:Version = "0\.4\.1"/, "client version must be v0.4.1");
+    assert.match(content, /\$Script:Version = "0\.4\.2"/, "client version must be v0.4.2");
     assert.match(content, /Initialize-SingleInstance/, "client must enforce same-install single instance");
     assert.match(content, /Local\\EADesktopTip_/, "client single instance lock must be per-user Windows named mutex");
     assert.match(content, /Duplicate desktop tip client instance rejected/, "duplicate launch must exit instead of creating another UI");
