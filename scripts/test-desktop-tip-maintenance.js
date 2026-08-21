@@ -56,7 +56,7 @@ function createModule(root, overrides = {}) {
     moduleConfig: {
       enabled: true,
       name: "EA 桌面提醒",
-      version: "0.4.0",
+      version: "0.4.1",
       storePath: tempFile(root, "events.json"),
       ttlMinutes: 240,
       clientRegistry: {
@@ -1100,7 +1100,17 @@ async function main() {
   const psClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const psPackageClient = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), "utf8");
   for (const content of [psClient, psPackageClient]) {
-    assert.match(content, /\$Script:Version = "0\.4\.0"/, "client version must be v0.4.0");
+    assert.match(content, /\$Script:Version = "0\.4\.1"/, "client version must be v0.4.1");
+    assert.match(content, /Initialize-SingleInstance/, "client must enforce same-install single instance");
+    assert.match(content, /Local\\EADesktopTip_/, "client single instance lock must be per-user Windows named mutex");
+    assert.match(content, /Duplicate desktop tip client instance rejected/, "duplicate launch must exit instead of creating another UI");
+    assert.match(content, /Wake-DesktopTipWindow/, "duplicate launch must wake existing EA tip window");
+    assert.match(content, /Stop-OtherDesktopTipClientInstances/, "client must clean old same-path instances after update");
+    assert.match(content, /Test-CommandLineTargetsMainScript/, "old instance cleanup must match exact desktop-tip-client.ps1 path");
+    assert.match(content, /\$_.ProcessId -ne \$PID/, "old instance cleanup must exclude current process");
+    assert.match(content, /\$Script:UpdatePromptInProgress/, "update checks must have prompt reentry lock");
+    assert.match(content, /\$Script:LastUpdatePostponedVersion/, "postponed update must remember version");
+    assert.match(content, /Client update auto prompt skipped after postpone/, "auto update must not prompt again before next cycle after postpone");
     assert.match(content, /Maintenance-StatusText/, "client must include maintenance panel formatter");
     assert.match(content, /TextFromCodes @\(27491,24335,26381/, "client must avoid raw Chinese literals for old PowerShell parsing");
     assert.match(content, /clientVersion=\$version/, "client poll must report clientVersion for registry");

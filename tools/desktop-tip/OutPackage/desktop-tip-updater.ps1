@@ -116,6 +116,58 @@ function Get-FileSha256 {
   }
 }
 
+function Normalize-PathText {
+  param([string]$PathText)
+  return ([System.IO.Path]::GetFullPath([string]$PathText)).TrimEnd("\","/").Replace("/", "\").ToLowerInvariant()
+}
+
+function Test-CommandLineTargetsMainScript {
+  param([string]$CommandLine)
+  $mainScriptPath = if ($MainScript) { $MainScript } else { Join-Path $InstallDir "desktop-tip-client.ps1" }
+  $mainScriptPath = Normalize-PathText $mainScriptPath
+  $command = ([string]$CommandLine).Replace("/", "\").ToLowerInvariant()
+  return $command.Contains($mainScriptPath)
+}
+
+function Stop-OtherDesktopTipClientInstances {
+  $stopped = 0
+  try {
+    try {
+      $processes = Get-CimInstance Win32_Process -ErrorAction Stop
+    } catch {
+      $searcher = New-Object System.Management.ManagementObjectSearcher "SELECT ProcessId,Name,CommandLine FROM Win32_Process"
+      $processes = $searcher.Get()
+    }
+    $processes = @($processes) | Where-Object {
+      [int]$_.ProcessId -ne $PID -and
+      ([string]$_.Name -match "^(powershell|pwsh)(\.exe)?$") -and
+      (Test-CommandLineTargetsMainScript ([string]$_.CommandLine))
+    }
+    foreach ($process in @($processes)) {
+      if ($OriginalPid -gt 0 -and [int]$process.ProcessId -eq $OriginalPid) {
+        continue
+      }
+      try {
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction Stop
+        $stopped += 1
+        Write-UpdateLog "INFO" "Stopped duplicate old desktop tip client process" @{
+          processId = [int]$process.ProcessId
+        }
+      } catch {
+        Write-UpdateLog "WARN" "Failed to stop duplicate old desktop tip client process" @{
+          processId = [int]$process.ProcessId
+          message = $_.Exception.Message
+        }
+      }
+    }
+  } catch {
+    Write-UpdateLog "WARN" "Duplicate desktop tip client process scan skipped; Win32_Process command line is unavailable" @{
+      message = $_.Exception.Message
+    }
+  }
+  return $stopped
+}
+
 try {
   $InstallDir = Assert-WithinDir -BaseDir $InstallDir -TargetPath $InstallDir
   $PackagePath = [System.IO.Path]::GetFullPath($PackagePath)
@@ -142,6 +194,7 @@ try {
       }
     } catch {}
   }
+  Stop-OtherDesktopTipClientInstances | Out-Null
 
   $allowed = Validate-ZipEntries -ZipPath $PackagePath
   $workDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ea-desktop-tip-extract-" + [Guid]::NewGuid().ToString("N"))

@@ -11,7 +11,7 @@ const outDir = path.join(toolDir, "OutPackage");
 const releaseDir = path.join(toolDir, "releases");
 const version = process.argv.find((item) => item.startsWith("--version="))?.slice("--version=".length)
   || process.env.DESKTOP_TIP_CLIENT_VERSION
-  || "0.4.0";
+  || "0.4.1";
 
 const updateFiles = [
   { source: path.join(toolDir, "desktop-tip-client.ps1"), entry: "desktop-tip-client.ps1" },
@@ -168,7 +168,7 @@ function main() {
     size,
     minimumSupportedVersion: "0.3.0",
     releaseNotes: [
-      "新增在桌面提醒软件中直接发送通知的功能。"
+      "修复重复出现多个更新提醒的问题。"
     ]
   };
   fs.writeFileSync(path.join(releaseDir, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

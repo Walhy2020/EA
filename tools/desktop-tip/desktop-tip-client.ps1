@@ -3,11 +3,15 @@ param(
   [string]$UserId = "",
   [string]$ServerBaseUrl = "",
   [switch]$Once,
-  [switch]$SelfTest
+  [switch]$SelfTest,
+  [switch]$SingleInstanceProbe,
+  [int]$HoldSingleInstanceSeconds = 0,
+  [switch]$SelfCleanOldInstancesTest,
+  [string]$ProcessSnapshotPath = ""
 )
 
 $ErrorActionPreference = "Stop"
-$Script:Version = "0.4.0"
+$Script:Version = "0.4.1"
 $Script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:ConfigPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $Script:Root "config\desktop-tip-client.config.json" }
 $Script:LogDir = Join-Path $Script:Root "logs"
@@ -21,7 +25,13 @@ $Script:CurrentTip = $null
 $Script:LastPollError = ""
 $Script:LastDisplayedTipId = ""
 $Script:UpdateInProgress = $false
+$Script:UpdatePromptInProgress = $false
 $Script:LastUpdateCheckAt = [DateTime]::MinValue
+$Script:LastPromptedUpdateVersion = ""
+$Script:LastUpdatePostponedVersion = ""
+$Script:LastUpdatePostponedAt = [DateTime]::MinValue
+$Script:SingleInstanceMutex = $null
+$Script:SingleInstanceWakeEvent = $null
 
 function Write-TipLog {
   param(
@@ -53,6 +63,119 @@ function Mask-LogId {
     return "***"
   }
   return $text.Substring(0, 2) + "***" + $text.Substring($text.Length - 2)
+}
+
+function Get-Sha256Text {
+  param([string]$Text)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+    return ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Normalize-PathText {
+  param([string]$PathText)
+  return ([System.IO.Path]::GetFullPath([string]$PathText)).TrimEnd("\","/").Replace("/", "\").ToLowerInvariant()
+}
+
+function Get-InstallInstanceKey {
+  $rootPath = Normalize-PathText $Script:Root
+  return (Get-Sha256Text $rootPath).Substring(0, 24)
+}
+
+function Initialize-SingleInstance {
+  $key = Get-InstallInstanceKey
+  $mutexName = "Local\EADesktopTip_" + $key
+  $wakeName = "Local\EADesktopTipWake_" + $key
+  $createdNew = $false
+  $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+  if (-not $createdNew) {
+    try {
+      $wakeEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $wakeName)
+      [void]$wakeEvent.Set()
+      $wakeEvent.Dispose()
+    } catch {}
+    Write-TipLog "INFO" "Duplicate desktop tip client instance rejected" @{
+      installKey = $key
+      root = $Script:Root
+    }
+    $mutex.Dispose()
+    return $false
+  }
+  $Script:SingleInstanceMutex = $mutex
+  $Script:SingleInstanceWakeEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $wakeName)
+  Write-TipLog "INFO" "Desktop tip client single instance acquired" @{
+    installKey = $key
+    root = $Script:Root
+  }
+  return $true
+}
+
+function Release-SingleInstance {
+  try {
+    if ($Script:SingleInstanceWakeEvent) {
+      $Script:SingleInstanceWakeEvent.Dispose()
+      $Script:SingleInstanceWakeEvent = $null
+    }
+  } catch {}
+  try {
+    if ($Script:SingleInstanceMutex) {
+      $Script:SingleInstanceMutex.ReleaseMutex()
+      $Script:SingleInstanceMutex.Dispose()
+      $Script:SingleInstanceMutex = $null
+    }
+  } catch {}
+}
+
+function Test-CommandLineTargetsMainScript {
+  param([string]$CommandLine)
+  $mainScript = Normalize-PathText (Join-Path $Script:Root "desktop-tip-client.ps1")
+  $command = ([string]$CommandLine).Replace("/", "\").ToLowerInvariant()
+  return $command.Contains($mainScript)
+}
+
+function Stop-OtherDesktopTipClientInstances {
+  $stopped = 0
+  try {
+    if ($ProcessSnapshotPath -and (Test-Path -LiteralPath $ProcessSnapshotPath)) {
+      $rawSnapshot = Get-Content -Path $ProcessSnapshotPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      $processes = @($rawSnapshot.processes)
+    } else {
+      try {
+        $processes = Get-CimInstance Win32_Process -ErrorAction Stop
+      } catch {
+        $searcher = New-Object System.Management.ManagementObjectSearcher "SELECT ProcessId,Name,CommandLine FROM Win32_Process"
+        $processes = $searcher.Get()
+      }
+    }
+    $processes = @($processes) | Where-Object {
+      [int]$_.ProcessId -ne $PID -and
+      ([string]$_.Name -match "^(powershell|pwsh)(\.exe)?$") -and
+      (Test-CommandLineTargetsMainScript ([string]$_.CommandLine))
+    }
+    foreach ($process in @($processes)) {
+      try {
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction Stop
+        $stopped += 1
+        Write-TipLog "INFO" "Stopped duplicate old desktop tip client process" @{
+          processId = [int]$process.ProcessId
+        }
+      } catch {
+        Write-TipLog "WARN" "Failed to stop duplicate old desktop tip client process" @{
+          processId = [int]$process.ProcessId
+          message = $_.Exception.Message
+        }
+      }
+    }
+  } catch {
+    Write-TipLog "WARN" "Duplicate desktop tip client process scan skipped; Win32_Process command line is unavailable" @{
+      message = $_.Exception.Message
+    }
+  }
+  return $stopped
 }
 
 function Default-Config {
@@ -339,7 +462,12 @@ function Check-ClientUpdate {
   if (-not $Script:Config.updateEnabled) {
     return
   }
-  if ($Script:UpdateInProgress) {
+  if ($Script:UpdateInProgress -or $Script:UpdatePromptInProgress) {
+    Write-TipLog "INFO" "Client update check skipped by prompt lock" @{
+      interactive = [bool]$Interactive
+      updateInProgress = [bool]$Script:UpdateInProgress
+      promptInProgress = [bool]$Script:UpdatePromptInProgress
+    }
     return
   }
   $now = Get-Date
@@ -349,10 +477,10 @@ function Check-ClientUpdate {
       return
     }
   }
-  $Script:LastUpdateCheckAt = $now
   try {
     $manifest = Get-UpdateManifest
     if ((Compare-Version ([string]$manifest.version) $Script:Version) -le 0) {
+      $Script:LastUpdateCheckAt = $now
       if ($Interactive) {
         [System.Windows.Forms.MessageBox]::Show((TextFromCodes @(24403,21069,24050,26159,26368,26032,29256,26412,32,118)) + $Script:Version + (TextFromCodes @(12290)), (TextFromCodes @(69,65,32,26700,38754,25552,37266,26356,26032)), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
       }
@@ -362,7 +490,18 @@ function Check-ClientUpdate {
       }
       return
     }
+    if (-not $Interactive -and $Script:LastUpdatePostponedVersion -eq [string]$manifest.version) {
+      $minutes = [Math]::Max(1, [int]$Script:Config.updateCheckMinutes)
+      if (($now - $Script:LastUpdatePostponedAt).TotalMinutes -lt $minutes) {
+        Write-TipLog "INFO" "Client update auto prompt skipped after postpone" @{
+          currentVersion = $Script:Version
+          nextVersion = [string]$manifest.version
+        }
+        return
+      }
+    }
     if ($Script:CurrentTip -or $Script:PendingEvents.Count -gt 0) {
+      $Script:LastUpdateCheckAt = $now
       Write-TipLog "INFO" "Client update prompt deferred by pending tips" @{
         currentVersion = $Script:Version
         nextVersion = [string]$manifest.version
@@ -374,6 +513,9 @@ function Check-ClientUpdate {
       }
       return
     }
+    $Script:UpdatePromptInProgress = $true
+    $Script:LastUpdateCheckAt = $now
+    $Script:LastPromptedUpdateVersion = [string]$manifest.version
     $notes = @($manifest.releaseNotes) -join [Environment]::NewLine
     $message = (TextFromCodes @(21457,29616,32,69,65,32,26700,38754,25552,37266,26032,29256,26412,12290)) + "`n" + (TextFromCodes @(24403,21069,29256,26412,65306,118)) + $Script:Version + "`n" + (TextFromCodes @(26032,29256,26412,65306,118)) + $manifest.version
     if ($notes) {
@@ -383,6 +525,8 @@ function Check-ClientUpdate {
     if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
       Start-ClientUpdate -Manifest $manifest
     } else {
+      $Script:LastUpdatePostponedVersion = [string]$manifest.version
+      $Script:LastUpdatePostponedAt = Get-Date
       Write-TipLog "INFO" "Client update postponed by user" @{
         currentVersion = $Script:Version
         nextVersion = [string]$manifest.version
@@ -396,6 +540,8 @@ function Check-ClientUpdate {
     if ($Interactive) {
       [System.Windows.Forms.MessageBox]::Show((TextFromCodes @(26816,26597,26356,26032,22833,36133,65306)) + $_.Exception.Message, (TextFromCodes @(69,65,32,26700,38754,25552,37266,26356,26032)), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
     }
+  } finally {
+    $Script:UpdatePromptInProgress = $false
   }
 }
 
@@ -799,6 +945,7 @@ function Start-TipWindow {
   Load-Config
   Ensure-ClientId
   Save-Config
+  Stop-OtherDesktopTipClientInstances | Out-Null
 
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
@@ -1004,6 +1151,19 @@ function Start-TipWindow {
     Set-Expanded -Tip $Script:CurrentTip
   }
 
+  function Wake-DesktopTipWindow {
+    $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+    if (-not $form.Visible) {
+      $form.Show()
+    }
+    $form.TopMost = $false
+    $form.TopMost = $true
+    $form.Activate()
+    Write-TipLog "INFO" "Desktop tip window waked by duplicate launch" @{
+      currentTip = [bool]$Script:CurrentTip
+    }
+  }
+
   $logoClick = {
     if ($Script:CurrentTip) {
       Set-Expanded -Tip $Script:CurrentTip
@@ -1066,6 +1226,9 @@ function Start-TipWindow {
   $timer = New-Object System.Windows.Forms.Timer
   $timer.Interval = [Math]::Max(3000, [int]$Script:Config.pollSeconds * 1000)
   $timer.Add_Tick({
+    if ($Script:SingleInstanceWakeEvent -and $Script:SingleInstanceWakeEvent.WaitOne(0)) {
+      Wake-DesktopTipWindow
+    }
     Poll-Events | Out-Null
     if ($Script:CurrentTip -and (Get-MaintenanceMeta -Tip $Script:CurrentTip)) {
       Set-Expanded -Tip $Script:CurrentTip
@@ -1099,4 +1262,30 @@ if ($Once) {
   exit 0
 }
 
-Start-TipWindow
+if ($SingleInstanceProbe) {
+  if (Initialize-SingleInstance) {
+    Write-Output "single-instance-acquired"
+    if ($HoldSingleInstanceSeconds -gt 0) {
+      Start-Sleep -Seconds $HoldSingleInstanceSeconds
+    }
+    Release-SingleInstance
+    exit 0
+  }
+  Write-Output "single-instance-duplicate"
+  exit 2
+}
+
+if ($SelfCleanOldInstancesTest) {
+  $count = Stop-OtherDesktopTipClientInstances
+  Write-Output ("stopped=" + $count)
+  exit 0
+}
+
+if (-not (Initialize-SingleInstance)) {
+  exit 0
+}
+try {
+  Start-TipWindow
+} finally {
+  Release-SingleInstance
+}

@@ -141,7 +141,7 @@
       "enabled": true,
       "name": "EA 桌面提醒",
       "source": "desktop-tip",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "storePath": "data/desktop-tip/events.json",
       "ttlMinutes": 4320,
       "maxStoredEvents": 500,

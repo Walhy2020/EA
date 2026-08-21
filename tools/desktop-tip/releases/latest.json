@@ -1,13 +1,13 @@
 {
-  "version": "0.4.0",
-  "appVersion": "0.6.66",
-  "publishedAt": "2026-08-20T10:41:44.411Z",
+  "version": "0.4.1",
+  "appVersion": "0.6.67",
+  "publishedAt": "2026-08-21T00:46:49.083Z",
   "packageUrl": "/api/desktop-tip/client-update/package",
-  "packageFile": "EA桌面提醒_client_v0.4.0.zip",
-  "sha256": "d54a6034130e0fb9a9d49d6ea75c21263a990f12b8ac0c25dca61d9fe942eefc",
-  "size": 56993,
+  "packageFile": "EA桌面提醒_client_v0.4.1.zip",
+  "sha256": "00c2ee5fd96e0a59015dbe085d5e142ad8fa4ca1d15639df8d94b04255b8c352",
+  "size": 66069,
   "minimumSupportedVersion": "0.3.0",
   "releaseNotes": [
-    "新增在桌面提醒软件中直接发送通知的功能。"
+    "修复重复出现多个更新提醒的问题。"
   ]
 }

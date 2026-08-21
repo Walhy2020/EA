@@ -98,6 +98,20 @@ function compareVersion(left, right) {
   return 0;
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function copyClientScript(targetPath) {
+  writeFile(targetPath, fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8"));
+}
+
+function stopChild(child) {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    child.kill();
+  }
+}
+
 function createModuleWithRelease(root, releaseDir, manifestPath) {
   return createDesktopTipModule({
     logger: { info() {}, warn() {}, error() {} },
@@ -304,10 +318,86 @@ function runUpdaterTests() {
     "-MainScript", restartScript,
     "-ExpectedSha256", "0".repeat(64),
     "-ExpectedSize", String(fs.statSync(okZip).size),
-    "-ExpectedVersion", "0.4.0"
+    "-ExpectedVersion", "0.4.1"
   ], { encoding: "utf8" });
   assert.notEqual(badHash.status, 0, "hash mismatch must fail safely");
   assert.equal(fs.readFileSync(path.join(installDir, "desktop-tip-client.ps1"), "utf8"), before);
+}
+
+async function runClientSingleInstanceAndCleanupTests() {
+  const root = tempRoot("ea-desktop-tip-single-instance-");
+  const installDir = path.join(root, "install-a");
+  const otherDir = path.join(root, "install-b");
+  fs.mkdirSync(installDir, { recursive: true });
+  fs.mkdirSync(otherDir, { recursive: true });
+  const clientPath = path.join(installDir, "desktop-tip-client.ps1");
+  const otherClientPath = path.join(otherDir, "desktop-tip-client.ps1");
+  copyClientScript(clientPath);
+  copyClientScript(otherClientPath);
+
+  const holder = childProcess.spawn("powershell", [
+    "-NoProfile", "-ExecutionPolicy", "Bypass",
+    "-File", clientPath,
+    "-SingleInstanceProbe",
+    "-HoldSingleInstanceSeconds", "20"
+  ], { windowsHide: true, stdio: "ignore" });
+  try {
+    await delay(1200);
+    const duplicate = childProcess.spawnSync("powershell", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass",
+      "-File", clientPath,
+      "-SingleInstanceProbe"
+    ], { encoding: "utf8" });
+    assert.notEqual(duplicate.status, 0, "same install dir second instance must be rejected");
+    assert.match(duplicate.stdout, /single-instance-duplicate/, "duplicate instance must report duplicate");
+
+    const differentInstall = childProcess.spawnSync("powershell", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass",
+      "-File", otherClientPath,
+      "-SingleInstanceProbe"
+    ], { encoding: "utf8" });
+    assert.equal(differentInstall.status, 0, differentInstall.stderr || differentInstall.stdout);
+    assert.match(differentInstall.stdout, /single-instance-acquired/, "different install dir must run independently");
+  } finally {
+    stopChild(holder);
+  }
+
+  const snapshotPath = path.join(root, "process-snapshot.json");
+  writeFile(snapshotPath, JSON.stringify({
+    processes: [
+      {
+        ProcessId: 0,
+        Name: "powershell.exe",
+        CommandLine: `powershell -File "${clientPath}"`
+      },
+      {
+        ProcessId: 0,
+        Name: "powershell.exe",
+        CommandLine: `powershell -File "${clientPath}"`
+      },
+      {
+        ProcessId: 0,
+        Name: "powershell.exe",
+        CommandLine: `powershell -File "${otherClientPath}"`
+      },
+      {
+        ProcessId: 0,
+        Name: "notepad.exe",
+        CommandLine: `notepad "${clientPath}"`
+      }
+    ]
+  }, null, 2));
+  const cleanup = childProcess.spawnSync("powershell", [
+    "-NoProfile", "-ExecutionPolicy", "Bypass",
+    "-File", clientPath,
+    "-SelfCleanOldInstancesTest",
+    "-ProcessSnapshotPath", snapshotPath
+  ], { encoding: "utf8" });
+  assert.equal(cleanup.status, 0, cleanup.stderr || cleanup.stdout);
+  assert.match(cleanup.stdout, /stopped=0/, "test snapshot must not kill synthetic or current process ids");
+  const logText = fs.readFileSync(path.join(installDir, "logs", "desktop-tip-client.log"), "utf8");
+  assert.match(logText, /Failed to stop duplicate old desktop tip client process/, "same-path synthetic process must be selected by exact path and fail safely");
+  assert.doesNotMatch(logText, /notepad/, "cleanup must not target non-PowerShell processes");
 }
 
 function runClientSourceTests() {
@@ -315,6 +405,17 @@ function runClientSourceTests() {
   assert.match(source, /function Compare-Version/, "client must include semver compare");
   assert.match(source, /Check-ClientUpdate/, "client must include update check");
   assert.match(source, /Start-ClientUpdate/, "client must include update handoff");
+  assert.match(source, /Initialize-SingleInstance/, "client must enforce same-install single instance");
+  assert.match(source, /Local\\EADesktopTip_/, "client single instance lock must be local per user session");
+  assert.match(source, /Stop-OtherDesktopTipClientInstances/, "client must clean old same-path instances started by old updater");
+  assert.match(source, /Test-CommandLineTargetsMainScript/, "client cleanup must match exact script path");
+  assert.match(source, /System\.Management\.ManagementObjectSearcher/, "client must fallback to System.Management Win32_Process command line reader");
+  assert.doesNotMatch(source, /WMIC\.exe|wmic/i, "client must not use unreliable wmic fallback");
+  assert.match(source, /\$Script:UpdatePromptInProgress/, "client must lock update prompt reentry");
+  assert.match(source, /\$Script:LastUpdatePostponedVersion/, "client must remember postponed version");
+  assert.match(source, /Client update auto prompt skipped after postpone/, "client must skip automatic prompt until next cycle after later");
+  assert.match(source, /if \(\$SingleInstanceProbe\)/, "single instance probe must allow automated tests without GUI");
+  assert.match(source, /if \(\$SelfCleanOldInstancesTest\)/, "old-instance cleanup test hook must not trigger real UI");
   assert.match(source, /if \(\$SelfTest\)/, "selftest branch must exist");
   assert.match(source, /if \(\$Once\)/, "once branch must exist");
   assert.ok(source.indexOf("Run-SelfTest") < source.indexOf("Start-TipWindow"), "SelfTest must exit before GUI update check");
@@ -322,12 +423,21 @@ function runClientSourceTests() {
   assert.equal(compareVersion("0.3.10", "0.3.9"), 1);
   assert.equal(compareVersion("0.3.0", "0.3"), 0);
   assert.equal(compareVersion("0.2.9", "0.3.0"), -1);
+  const updater = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-updater.ps1"), "utf8");
+  assert.match(updater, /Validate-ZipEntries/, "updater must validate zip whitelist");
+  assert.match(updater, /Restore-Backup/, "updater must restore backup on failure");
+  assert.match(updater, /Stop-OtherDesktopTipClientInstances/, "updater must stop same-path old client instances for future updates");
+  assert.match(updater, /Test-CommandLineTargetsMainScript/, "updater must match exact client script path");
+  assert.match(updater, /System\.Management\.ManagementObjectSearcher/, "updater must fallback to System.Management Win32_Process command line reader");
+  assert.doesNotMatch(updater, /WMIC\.exe|wmic/i, "updater must not use unreliable wmic fallback");
+  assert.match(updater, /\$_.ProcessId -ne \$PID/, "updater cleanup must not stop itself");
 }
 
 async function main() {
   runClientSourceTests();
   runManifestValidationTests();
   runUpdaterTests();
+  await runClientSingleInstanceAndCleanupTests();
   await runServerEndpointTests();
   console.log("Desktop tip update tests passed");
 }
