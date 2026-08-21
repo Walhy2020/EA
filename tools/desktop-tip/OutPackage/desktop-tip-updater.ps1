@@ -169,6 +169,13 @@ function Stop-OtherDesktopTipClientInstances {
 }
 
 function Start-DesktopTipClientHidden {
+  if ($LauncherPath) {
+    $launcherExePath = Assert-WithinDir -BaseDir $InstallDir -TargetPath $LauncherPath
+    if ([System.IO.Path]::GetExtension($launcherExePath) -ieq ".exe" -and (Test-Path -LiteralPath $launcherExePath)) {
+      Start-Process -FilePath $launcherExePath -WorkingDirectory $InstallDir -WindowStyle Hidden
+      return "exe"
+    }
+  }
   $mainScriptPath = if ($MainScript) { $MainScript } else { Join-Path $InstallDir "desktop-tip-client.ps1" }
   $mainScriptPath = Assert-WithinDir -BaseDir $InstallDir -TargetPath $mainScriptPath
   if (-not (Test-Path -LiteralPath $mainScriptPath)) {
@@ -180,6 +187,7 @@ function Start-DesktopTipClientHidden {
     "-WindowStyle", "Hidden",
     "-File", $mainScriptPath
   ) -WorkingDirectory $InstallDir -WindowStyle Hidden
+  return "powershell_fallback"
 }
 
 try {
@@ -252,10 +260,11 @@ try {
     fileCount = $files.Count
   }
 
-  Start-DesktopTipClientHidden
+  $restartMode = Start-DesktopTipClientHidden
   Write-UpdateLog "INFO" "Client restarted after update" @{
     target = [System.IO.Path]::GetFileName($MainScript)
     launcher = if ($LauncherPath) { [System.IO.Path]::GetFileName($LauncherPath) } else { "" }
+    restartMode = $restartMode
     hidden = $true
   }
 } catch {

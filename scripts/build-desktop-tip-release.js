@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const packageInfo = require("../package.json");
@@ -11,21 +12,8 @@ const outDir = path.join(toolDir, "OutPackage");
 const releaseDir = path.join(toolDir, "releases");
 const version = process.argv.find((item) => item.startsWith("--version="))?.slice("--version=".length)
   || process.env.DESKTOP_TIP_CLIENT_VERSION
-  || "0.4.2";
-
-const updateFiles = [
-  { source: path.join(toolDir, "desktop-tip-client.ps1"), entry: "desktop-tip-client.ps1" },
-  { source: path.join(toolDir, "desktop-tip-updater.ps1"), entry: "desktop-tip-updater.ps1" },
-  { source: path.join(toolDir, "启动EA右下角提醒.bat"), entry: "启动EA右下角提醒.bat" },
-  { source: path.join(toolDir, "README.md"), entry: "README.md" },
-  { source: path.join(outDir, "README.txt"), entry: "README.txt" }
-];
-
-const installFiles = [
-  ...updateFiles,
-  { source: path.join(outDir, "config", "desktop-tip-client.config.json"), entry: "config/desktop-tip-client.config.json" },
-  { source: path.join(outDir, "config", "desktop-tip-client.config.example.json"), entry: "config/desktop-tip-client.config.example.json" }
-];
+  || "0.5.0";
+const launcherFileName = "EA桌面提醒.exe";
 
 function crc32Buffer(buffer) {
   let crc = 0 ^ -1;
@@ -148,8 +136,59 @@ function assertInstallPackageClean(files) {
   }
 }
 
+function buildLauncher() {
+  const result = childProcess.spawnSync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", path.join(toolDir, "build-desktop-tip-launcher.ps1")
+  ], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Desktop tip launcher build failed: ${result.error ? result.error.message : result.stderr || result.stdout}`);
+  }
+}
+
+function syncOutPackagePrograms() {
+  fs.mkdirSync(outDir, { recursive: true });
+  buildLauncher();
+  const launcherPath = path.join(toolDir, launcherFileName);
+  const launcherBytes = fs.readFileSync(launcherPath);
+  const launcherSha256 = crypto.createHash("sha256").update(launcherBytes).digest("hex");
+  const clientTemplate = fs.readFileSync(path.join(toolDir, "desktop-tip-client.ps1"), "utf8");
+  const payloadMarker = "__EA_DESKTOP_TIP_LAUNCHER_BASE64__";
+  const shaMarker = "__EA_DESKTOP_TIP_LAUNCHER_SHA256__";
+  if (!clientTemplate.includes(payloadMarker) || !clientTemplate.includes(shaMarker)) {
+    throw new Error("Desktop tip client launcher payload markers are missing");
+  }
+  const releaseClient = clientTemplate
+    .replace(payloadMarker, launcherBytes.toString("base64"))
+    .replace(shaMarker, launcherSha256);
+  fs.writeFileSync(path.join(outDir, "desktop-tip-client.ps1"), releaseClient, "utf8");
+  for (const fileName of ["desktop-tip-updater.ps1", "启动EA右下角提醒.bat", "README.md", launcherFileName]) {
+    fs.copyFileSync(path.join(toolDir, fileName), path.join(outDir, fileName));
+  }
+  return { launcherPath, launcherSha256, launcherSize: launcherBytes.length };
+}
+
 function main() {
   fs.mkdirSync(releaseDir, { recursive: true });
+  const launcher = syncOutPackagePrograms();
+  const updateFiles = [
+    { source: path.join(outDir, "desktop-tip-client.ps1"), entry: "desktop-tip-client.ps1" },
+    { source: path.join(outDir, "desktop-tip-updater.ps1"), entry: "desktop-tip-updater.ps1" },
+    { source: path.join(outDir, "启动EA右下角提醒.bat"), entry: "启动EA右下角提醒.bat" },
+    { source: path.join(outDir, "README.md"), entry: "README.md" },
+    { source: path.join(outDir, "README.txt"), entry: "README.txt" }
+  ];
+  const installFiles = [
+    ...updateFiles,
+    { source: launcher.launcherPath, entry: launcherFileName },
+    { source: path.join(outDir, "config", "desktop-tip-client.config.json"), entry: "config/desktop-tip-client.config.json" },
+    { source: path.join(outDir, "config", "desktop-tip-client.config.example.json"), entry: "config/desktop-tip-client.config.example.json" }
+  ];
   assertInstallPackageClean(updateFiles);
   assertInstallPackageClean(installFiles);
 
@@ -168,7 +207,7 @@ function main() {
     size,
     minimumSupportedVersion: "0.3.0",
     releaseNotes: [
-      "优化软件启动体验。"
+      "桌面提醒现在可直接通过 EXE 启动，并默认随系统启动。"
     ]
   };
   fs.writeFileSync(path.join(releaseDir, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
@@ -185,7 +224,11 @@ function main() {
     updatePackageSha256: hash,
     manifest: path.relative(root, path.join(releaseDir, "latest.json")),
     installPackage: path.relative(root, installZipPath),
-    installPackageSize: fs.statSync(installZipPath).size
+    installPackageSize: fs.statSync(installZipPath).size,
+    launcher: path.relative(root, launcher.launcherPath),
+    launcherSize: launcher.launcherSize,
+    launcherSha256: launcher.launcherSha256,
+    updateDelivery: "embedded_verified_launcher_payload"
   }, null, 2));
 }
 

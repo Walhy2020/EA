@@ -85,6 +85,36 @@ function sha256(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
+function readStoredZipEntries(zipPath) {
+  const buffer = fs.readFileSync(zipPath);
+  const entries = new Map();
+  let offset = 0;
+  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
+    const method = buffer.readUInt16LE(offset + 8);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    assert.equal(method, 0, "release ZIP entries must use stored mode for deterministic local inspection");
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
+    entries.set(name, buffer.subarray(dataStart, dataStart + compressedSize));
+    offset = dataStart + compressedSize;
+  }
+  return entries;
+}
+
+function readPeSubsystem(executablePath) {
+  const buffer = fs.readFileSync(executablePath);
+  assert.equal(buffer.subarray(0, 2).toString("ascii"), "MZ", "launcher must be a Windows PE executable");
+  const peOffset = buffer.readUInt32LE(0x3c);
+  assert.equal(buffer.subarray(peOffset, peOffset + 4).toString("binary"), "PE\u0000\u0000");
+  const optionalHeader = peOffset + 24;
+  const magic = buffer.readUInt16LE(optionalHeader);
+  const subsystemOffset = magic === 0x20b ? optionalHeader + 88 : optionalHeader + 68;
+  return buffer.readUInt16LE(subsystemOffset);
+}
+
 function compareVersion(left, right) {
   const a = String(left).replace(/^[vV]/, "").split(".").map((item) => (/^\d+$/.test(item) ? Number(item) : 0));
   const b = String(right).replace(/^[vV]/, "").split(".").map((item) => (/^\d+$/.test(item) ? Number(item) : 0));
@@ -449,6 +479,95 @@ async function runLauncherBatTests() {
   }
 }
 
+async function runLauncherExeTests() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const launcherName = "EA桌面提醒.exe";
+  const sourceLauncher = path.join(__dirname, "..", "tools", "desktop-tip", launcherName);
+  const packageLauncher = path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", launcherName);
+  assert.ok(fs.existsSync(sourceLauncher), "source desktop tip EXE is missing");
+  assert.ok(fs.existsSync(packageLauncher), "OutPackage desktop tip EXE is missing");
+  assert.equal(readPeSubsystem(sourceLauncher), 2, "desktop tip EXE must use the Windows GUI subsystem");
+  assert.equal(sha256(sourceLauncher), sha256(packageLauncher), "source and OutPackage EXE must match");
+
+  const root = tempRoot("ea-desktop-tip-exe-");
+  const launcherPath = path.join(root, launcherName);
+  const markerPath = path.join(root, "client-started.txt");
+  fs.copyFileSync(sourceLauncher, launcherPath);
+  writeFile(path.join(root, "desktop-tip-client.ps1"), `Set-Content -LiteralPath '${markerPath.replace(/'/g, "''")}' -Value started -Encoding UTF8`);
+  const selfTest = childProcess.spawnSync(launcherPath, ["--self-test"], {
+    cwd: root,
+    windowsHide: true,
+    encoding: "utf8",
+    timeout: 10000
+  });
+  assert.equal(selfTest.status, 0, selfTest.error ? selfTest.error.message : "desktop tip EXE self-test failed");
+
+  const startedAt = Date.now();
+  const launch = childProcess.spawnSync(launcherPath, ["--skip-autostart"], {
+    cwd: root,
+    windowsHide: true,
+    encoding: "utf8",
+    timeout: 10000
+  });
+  assert.equal(launch.status, 0, launch.error ? launch.error.message : "desktop tip EXE launch failed");
+  assert.ok(Date.now() - startedAt < 3000, "desktop tip EXE must return quickly after hidden client start");
+  assert.equal(await waitForFile(markerPath), true, "desktop tip EXE must start the PowerShell client");
+}
+
+function runReleaseArtifactTests() {
+  const root = path.join(__dirname, "..", "tools", "desktop-tip");
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "releases", "latest.json"), "utf8"));
+  assert.equal(manifest.version, "0.5.0");
+  assert.equal(manifest.appVersion, "0.6.71");
+  const updatePath = path.join(root, "releases", manifest.packageFile);
+  assert.equal(fs.statSync(updatePath).size, manifest.size);
+  assert.equal(sha256(updatePath), manifest.sha256);
+  const updateEntries = readStoredZipEntries(updatePath);
+  assert.ok(updateEntries.has("desktop-tip-client.ps1"));
+  assert.equal(updateEntries.has("EA桌面提醒.exe"), false, "v0.5.0 update ZIP must stay compatible with the v0.4.2 updater whitelist");
+  const releaseClient = updateEntries.get("desktop-tip-client.ps1").toString("utf8");
+  assert.doesNotMatch(releaseClient, /__EA_DESKTOP_TIP_LAUNCHER_(BASE64|SHA256)__/, "release client must embed the verified EXE payload");
+  const base64Match = releaseClient.match(/\$Script:LauncherPayloadBase64 = "([A-Za-z0-9+/=]+)"/);
+  const shaMatch = releaseClient.match(/\$Script:LauncherPayloadSha256 = "([a-f0-9]{64})"/);
+  assert.ok(base64Match && shaMatch, "release client launcher payload metadata is missing");
+  const launcherBuffer = Buffer.from(base64Match[1], "base64");
+  assert.equal(crypto.createHash("sha256").update(launcherBuffer).digest("hex"), shaMatch[1]);
+  assert.equal(crypto.createHash("sha256").update(launcherBuffer).digest("hex"), sha256(path.join(root, "EA桌面提醒.exe")));
+
+  const installPath = path.join(root, "OutPackage", "EA桌面提醒_v0.5.0_首次安装.zip");
+  const installEntries = readStoredZipEntries(installPath);
+  assert.ok(installEntries.has("EA桌面提醒.exe"), "first-install ZIP must contain the EXE entrypoint");
+  assert.ok(installEntries.has("config/desktop-tip-client.config.json"));
+  assert.equal(installEntries.has("data/client-id.txt"), false);
+}
+
+function runLauncherPayloadMigrationTest() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const root = tempRoot("ea-desktop-tip-launcher-migration-");
+  const clientPath = path.join(root, "desktop-tip-client.ps1");
+  fs.copyFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "OutPackage", "desktop-tip-client.ps1"), clientPath);
+  const result = childProcess.spawnSync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", clientPath,
+    "-LauncherMigrationTest"
+  ], {
+    windowsHide: true,
+    encoding: "utf8",
+    timeout: 15000
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /launcher-migration-ok/);
+  const launcherPath = path.join(root, "EA桌面提醒.exe");
+  assert.ok(fs.existsSync(launcherPath), "online migration must materialize the EXE");
+  assert.equal(readPeSubsystem(launcherPath), 2);
+  assert.equal(sha256(launcherPath), sha256(path.join(__dirname, "..", "tools", "desktop-tip", "EA桌面提醒.exe")));
+}
+
 function runClientSourceTests() {
   const source = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "desktop-tip-client.ps1"), "utf8");
   const launcher = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "启动EA右下角提醒.bat"), "utf8");
@@ -465,8 +584,12 @@ function runClientSourceTests() {
   assert.match(source, /\$Script:UpdatePromptInProgress/, "client must lock update prompt reentry");
   assert.match(source, /\$Script:LastUpdatePostponedVersion/, "client must remember postponed version");
   assert.match(source, /Client update auto prompt skipped after postpone/, "client must skip automatic prompt until next cycle after later");
+  assert.match(source, /Ensure-DesktopTipLauncher/, "client must materialize the verified EXE during online migration");
+  assert.match(source, /Set-DesktopTipAutoStart/, "client must expose a Windows startup toggle");
+  assert.match(source, /autostart-preference\.txt/, "client must persist an explicit startup preference");
   assert.match(source, /if \(\$SingleInstanceProbe\)/, "single instance probe must allow automated tests without GUI");
   assert.match(source, /if \(\$SelfCleanOldInstancesTest\)/, "old-instance cleanup test hook must not trigger real UI");
+  assert.match(source, /if \(\$LauncherMigrationTest\)/, "launcher migration must be independently testable without GUI or startup changes");
   assert.match(source, /if \(\$SelfTest\)/, "selftest branch must exist");
   assert.match(source, /if \(\$Once\)/, "once branch must exist");
   assert.ok(source.indexOf("Run-SelfTest") < source.indexOf("Start-TipWindow"), "SelfTest must exit before GUI update check");
@@ -480,22 +603,32 @@ function runClientSourceTests() {
   assert.match(updater, /Stop-OtherDesktopTipClientInstances/, "updater must stop same-path old client instances for future updates");
   assert.match(updater, /Test-CommandLineTargetsMainScript/, "updater must match exact client script path");
   assert.match(updater, /function Start-DesktopTipClientHidden/, "updater must restart the client through a hidden launcher helper");
+  assert.match(updater, /GetExtension\(\$launcherExePath\).*\.exe/, "updater must prefer the installed EXE after migration");
   assert.match(updater, /"-WindowStyle", "Hidden"/, "updater restart arguments must hide PowerShell");
   assert.doesNotMatch(updater, /Start-Process -FilePath \$restartTarget/, "updater must not restart through a visible BAT/cmd window");
   assert.match(updater, /System\.Management\.ManagementObjectSearcher/, "updater must fallback to System.Management Win32_Process command line reader");
   assert.doesNotMatch(updater, /WMIC\.exe|wmic/i, "updater must not use unreliable wmic fallback");
   assert.match(updater, /\$_.ProcessId -ne \$PID/, "updater cleanup must not stop itself");
   for (const content of [launcher, packageLauncher]) {
+    assert.match(content, /69,65,26700,38754,25552,37266/, "legacy BAT must locate the desktop tip EXE without raw Chinese command text");
     assert.match(content, /Start-Process -FilePath 'powershell\.exe'.*'-WindowStyle','Hidden'.*desktop-tip-client\.ps1/im, "launcher BAT must start the client hidden through a short helper process");
     assert.doesNotMatch(content, /^powershell\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File/im, "launcher BAT must not block on foreground PowerShell");
   }
+  const launcherSource = fs.readFileSync(path.join(__dirname, "..", "tools", "desktop-tip", "DesktopTipLauncher.cs"), "utf8");
+  assert.match(launcherSource, /CreateNoWindow\s*=\s*true/, "desktop tip EXE must hide the PowerShell console");
+  assert.match(launcherSource, /SpecialFolder\.Startup/, "desktop tip EXE must enable current-user startup by default");
+  assert.match(launcherSource, /autostart-preference\.txt/, "desktop tip EXE must honor the saved startup preference");
+  assert.doesNotMatch(launcherSource, /src[\\/]main\.js|39200|Restart EA/, "M04 EXE must not manage the EA server");
 }
 
 async function main() {
   runClientSourceTests();
+  runReleaseArtifactTests();
+  runLauncherPayloadMigrationTest();
   runManifestValidationTests();
   runUpdaterTests();
   await runClientSingleInstanceAndCleanupTests();
+  await runLauncherExeTests();
   await runLauncherBatTests();
   await runServerEndpointTests();
   console.log("Desktop tip update tests passed");

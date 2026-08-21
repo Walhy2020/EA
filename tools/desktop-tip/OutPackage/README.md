@@ -1,8 +1,8 @@
 # EA 桌面提醒
 
-Version: 0.4.2
+Version: 0.5.0
 
-EA 服务端 desktopTip 模块版本：0.4.3；当前客户端 v0.4.2 优化启动体验，双击启动 BAT 后不再长期挂着空白控制台，并保留 v0.4.1 的单实例和更新弹窗修复。
+EA 服务端 desktopTip 模块版本：0.4.3；当前客户端 v0.5.0 新增正式入口 `EA桌面提醒.exe`。同事解压后直接双击 EXE 即可使用，不显示 PowerShell 控制台，并默认随当前用户登录 Windows 自动启动。
 
 ## 管理后台普通消息测试
 
@@ -16,9 +16,10 @@ EA 桌面提醒是本机 PC 右下角浮窗客户端。EA 服务端写入 deskto
 
 ## 文件
 
+- `EA桌面提醒.exe`: 同事日常使用的正式入口，只启动 M04 桌面提醒，不管理 EA 服务端。
 - `desktop-tip-client.ps1`: Windows 浮窗客户端。
 - `desktop-tip-updater.ps1`: 独立更新助手，负责备份、白名单替换、失败回滚和重启。
-- `启动EA右下角提醒.bat`: 双击启动脚本，会快速退出并隐藏后台 PowerShell 客户端进程。
+- `启动EA右下角提醒.bat`: 旧版兼容入口，优先启动 EXE；EXE 缺失时才隐藏启动 PowerShell 客户端。
 - `config/desktop-tip-client.config.json`: 客户端配置。
 - `logs/desktop-tip-client.log`: 客户端运行日志，运行时创建。
 - `OutPackage/`: 分享输出目录。
@@ -35,7 +36,8 @@ EA 桌面提醒是本机 PC 右下角浮窗客户端。EA 服务端写入 deskto
   - 停服延长，橙色状态直显，显示本次延长、累计延长和最新恢复时间。
   - 更新完成，绿色状态直显，显示实际完成时间。
 - 旧 PowerShell 中文兼容：客户端面板中文文案使用 Unicode 码点生成，避免无 BOM UTF-8 在 Windows PowerShell 5 下乱码。
-- 在线更新：启动后自动检查新版，运行期间默认每 30 分钟检查一次；右键菜单可手动“检查更新”。v0.4.1 起同一安装目录只允许一个客户端实例运行，重复双击会唤醒已有实例，不再创建新的轮询进程或更新弹窗；从旧版本升级后，新客户端首次启动会精确清理同安装目录同脚本路径的旧客户端进程。v0.4.2 起首次安装包启动 BAT 和更新后自动重启都使用隐藏后台启动，不再保留空白控制台窗口。
+- 在线更新：启动后自动检查新版，运行期间默认每 30 分钟检查一次；右键菜单可手动“检查更新”。v0.4.1 起同一安装目录只允许一个客户端实例运行；v0.5.0 起在线升级会校验并生成 EXE 入口，后续更新继续保留 config/data/logs/clientId。
+- 开机启动：首次正常运行默认创建当前用户 Startup 快捷方式；右键蓝色 EA 按钮可取消或重新开启“开机自动启动”，选择会持久化，不会在下次手动启动时被覆盖。
 
 ## 配置
 
@@ -57,11 +59,11 @@ EA 桌面提醒是本机 PC 右下角浮窗客户端。EA 服务端写入 deskto
 
 ## 在线更新发布
 
-现有 v0.2.3 客户端不含更新器，第一次需要手动替换到 v0.3.0 或更高版本、或重新发首次安装包。从 v0.3.0 起后续可在线更新；已在 v0.3.0 及以上的同事可在软件右键菜单选择“检查更新”升级到 v0.4.2。
+现有 v0.2.3 客户端不含更新器，第一次需要手动替换到 v0.3.0 或更高版本、或重新发首次安装包。从 v0.3.0 起后续可在线更新；已在 v0.3.0 及以上的同事可在软件右键菜单选择“检查更新”升级到 v0.5.0。
 
-同事日常启动请双击 `启动EA右下角提醒.bat`。如果直接手工运行 `desktop-tip-client.ps1`，Windows 仍可能显示 PowerShell 控制台；分享包默认启动入口不会长期保留控制台。
+同事日常启动请双击 `EA桌面提醒.exe`。旧 BAT 继续保留兼容，但不再是推荐入口；如果直接手工运行 `desktop-tip-client.ps1`，Windows 仍可能显示 PowerShell 控制台。
 
-如果已经出现很多“EA 桌面提醒更新”窗口，临时止血方式：只保留一个 `desktop-tip-client.ps1` 进程，关闭其他重复窗口；或在任意一个更新窗口点击“是”升级到 v0.4.2，升级后新客户端会自动收敛同安装目录的旧实例。不要批量结束其他 PowerShell，因为可能属于别的工具。
+如果已经出现很多“EA 桌面提醒更新”窗口，临时止血方式：只保留一个 `desktop-tip-client.ps1` 进程，关闭其他重复窗口；或在任意一个更新窗口点击“是”升级到 v0.5.0，升级后新客户端会自动收敛同安装目录的旧实例。不要批量结束其他 PowerShell，因为可能属于别的工具。
 
 发布新版客户端时，在仓库根目录执行：
 
@@ -75,7 +77,7 @@ npm run build:desktop-tip-release
 - `tools/desktop-tip/releases/EA桌面提醒_client_v版本号.zip`
 - `tools/desktop-tip/OutPackage/EA桌面提醒_v版本号_首次安装.zip`
 
-更新包只包含程序白名单文件，不包含 `config/`、`data/`、`logs/`、`client-id.txt` 或 Secret。EA 服务端公开只读提供：
+首次安装包包含 `EA桌面提醒.exe`；v0.5.0 在线更新包继续使用 v0.4.2 已允许的程序白名单，并由新版客户端从 SHA256 校验后的内置载荷生成 EXE，从而兼容现有同事自动升级。更新包不包含 `config/`、`data/`、`logs/`、`client-id.txt` 或 Secret。EA 服务端公开只读提供：
 
 - `GET /api/desktop-tip/client-update/manifest`
 - `GET /api/desktop-tip/client-update/package`
@@ -86,7 +88,11 @@ npm run build:desktop-tip-release
 powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop-tip-client.ps1 -SelfTest
 ```
 
-预期输出包含 `EA 桌面提醒 v0.4.2 self test passed`，并且中文显示正常。
+预期输出包含 `EA 桌面提醒 v0.5.0 self test passed`，并且中文显示正常。EXE 自检：
+
+```powershell
+& ".\EA桌面提醒.exe" --self-test
+```
 
 端到端行为测试请在仓库根目录运行：
 

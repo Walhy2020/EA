@@ -1,6 +1,6 @@
 {
   "name": "eazygame-integrated-assistant",
-  "version": "0.6.69",
+  "version": "0.6.71",
   "private": true,
   "description": "Unified WeCom smart robot entry and local admin console for EazyGame operations.",
   "main": "src/main.js",
@@ -13,6 +13,7 @@
     "test:desktop-tip-maintenance": "node scripts/test-desktop-tip-maintenance.js",
     "test:desktop-tip-update": "node scripts/test-desktop-tip-update.js",
     "test:desktop-tip-admin-ui": "node scripts/test-desktop-tip-admin-ui.js",
+    "build:desktop-tip-launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/desktop-tip/build-desktop-tip-launcher.ps1",
     "build:desktop-tip-release": "node scripts/build-desktop-tip-release.js"
   },
   "engines": {

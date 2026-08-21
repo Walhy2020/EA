@@ -7,11 +7,12 @@ param(
   [switch]$SingleInstanceProbe,
   [int]$HoldSingleInstanceSeconds = 0,
   [switch]$SelfCleanOldInstancesTest,
+  [switch]$LauncherMigrationTest,
   [string]$ProcessSnapshotPath = ""
 )
 
 $ErrorActionPreference = "Stop"
-$Script:Version = "0.4.2"
+$Script:Version = "0.5.0"
 $Script:Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:ConfigPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $Script:Root "config\desktop-tip-client.config.json" }
 $Script:LogDir = Join-Path $Script:Root "logs"
@@ -32,6 +33,8 @@ $Script:LastUpdatePostponedVersion = ""
 $Script:LastUpdatePostponedAt = [DateTime]::MinValue
 $Script:SingleInstanceMutex = $null
 $Script:SingleInstanceWakeEvent = $null
+$Script:LauncherPayloadBase64 = "__EA_DESKTOP_TIP_LAUNCHER_BASE64__"
+$Script:LauncherPayloadSha256 = "__EA_DESKTOP_TIP_LAUNCHER_SHA256__"
 
 function Write-TipLog {
   param(
@@ -385,6 +388,149 @@ function Get-FileSha256 {
   }
 }
 
+function Get-LauncherFileName {
+  return (TextFromCodes @(69,65,26700,38754,25552,37266)) + ".exe"
+}
+
+function Get-LauncherPath {
+  return Join-Path $Script:Root (Get-LauncherFileName)
+}
+
+function Get-AutoStartPreferencePath {
+  return Join-Path $Script:Root "data\autostart-preference.txt"
+}
+
+function Get-AutoStartShortcutPath {
+  $startupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
+  return Join-Path $startupDir "EADesktopTip.lnk"
+}
+
+function Ensure-DesktopTipLauncher {
+  $launcherPath = Get-LauncherPath
+  $payloadReady = $Script:LauncherPayloadBase64 -and
+    -not $Script:LauncherPayloadBase64.StartsWith("__EA_DESKTOP_TIP_LAUNCHER_") -and
+    $Script:LauncherPayloadSha256 -match "^[a-fA-F0-9]{64}$"
+
+  if (Test-Path -LiteralPath $launcherPath) {
+    if (-not $payloadReady) {
+      return $true
+    }
+    $existingSha = Get-FileSha256 -Path $launcherPath
+    if ($existingSha -eq $Script:LauncherPayloadSha256.ToLowerInvariant()) {
+      return $true
+    }
+  }
+
+  if (-not $payloadReady) {
+    Write-TipLog "WARN" "Desktop tip EXE payload is unavailable" @{
+      launcherExists = [bool](Test-Path -LiteralPath $launcherPath)
+    }
+    return $false
+  }
+
+  $tempPath = Join-Path $Script:Root ("EA-Desktop-Tip-" + [Guid]::NewGuid().ToString("N") + ".tmp")
+  try {
+    $bytes = [Convert]::FromBase64String($Script:LauncherPayloadBase64)
+    [System.IO.File]::WriteAllBytes($tempPath, $bytes)
+    $actualSha = Get-FileSha256 -Path $tempPath
+    if ($actualSha -ne $Script:LauncherPayloadSha256.ToLowerInvariant()) {
+      throw "desktop tip launcher payload SHA256 mismatch"
+    }
+    Move-Item -LiteralPath $tempPath -Destination $launcherPath -Force
+    Write-TipLog "INFO" "Desktop tip EXE installed from verified payload" @{
+      version = $Script:Version
+      size = $bytes.Length
+      sha256Prefix = $actualSha.Substring(0, 12)
+    }
+    return $true
+  } catch {
+    Write-TipLog "WARN" "Desktop tip EXE installation failed" @{
+      version = $Script:Version
+      message = $_.Exception.Message
+    }
+    return $false
+  } finally {
+    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Read-AutoStartPreference {
+  $path = Get-AutoStartPreferencePath
+  if (-not (Test-Path -LiteralPath $path)) {
+    return $true
+  }
+  try {
+    $value = ([string](Get-Content -LiteralPath $path -Raw -Encoding UTF8)).Trim()
+    return $value -ne "disabled"
+  } catch {
+    Write-TipLog "WARN" "Desktop tip autostart preference read failed" @{
+      message = $_.Exception.Message
+    }
+    return $true
+  }
+}
+
+function Test-DesktopTipAutoStart {
+  return Test-Path -LiteralPath (Get-AutoStartShortcutPath)
+}
+
+function Set-DesktopTipAutoStart {
+  param([bool]$Enabled)
+  $preferencePath = Get-AutoStartPreferencePath
+  $shortcutPath = Get-AutoStartShortcutPath
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $preferencePath) | Out-Null
+
+  if (-not $Enabled) {
+    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $preferencePath -Value "disabled" -Encoding UTF8
+    Write-TipLog "INFO" "Desktop tip autostart disabled" @{
+      method = "startup_shortcut"
+    }
+    return
+  }
+
+  if (-not (Ensure-DesktopTipLauncher)) {
+    throw ((TextFromCodes @(26080,27861,21019,24314,69,65,26700,38754,25552,37266,31243,24207,65292,26080,27861,35774,32622,24320,26426,33258,21160,21160,12290)))
+  }
+  $launcherPath = Get-LauncherPath
+  $shell = $null
+  $shortcut = $null
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $launcherPath
+    $shortcut.Arguments = ""
+    $shortcut.WorkingDirectory = $Script:Root
+    $shortcut.IconLocation = "$launcherPath,0"
+    $shortcut.Description = "EA desktop tip"
+    $shortcut.Save()
+    Set-Content -LiteralPath $preferencePath -Value "enabled" -Encoding UTF8
+    Write-TipLog "INFO" "Desktop tip autostart enabled" @{
+      method = "startup_shortcut"
+    }
+  } finally {
+    if ($shortcut -and [System.Runtime.InteropServices.Marshal]::IsComObject($shortcut)) {
+      [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut)
+    }
+    if ($shell -and [System.Runtime.InteropServices.Marshal]::IsComObject($shell)) {
+      [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+    }
+  }
+}
+
+function Initialize-DesktopTipLauncher {
+  if (-not (Ensure-DesktopTipLauncher)) {
+    return
+  }
+  try {
+    Set-DesktopTipAutoStart -Enabled (Read-AutoStartPreference)
+  } catch {
+    Write-TipLog "WARN" "Desktop tip autostart initialization failed" @{
+      message = $_.Exception.Message
+    }
+  }
+}
+
 function Start-ClientUpdate {
   param([object]$Manifest)
   if ($Script:UpdateInProgress) {
@@ -424,7 +570,7 @@ function Start-ClientUpdate {
       throw ((TextFromCodes @(26356,26032,21161,25163,19981,23384,22312,65306)) + $updaterPath)
     }
     $mainScript = Join-Path $Script:Root "desktop-tip-client.ps1"
-    $launcher = Join-Path $Script:Root ((TextFromCodes @(21551,21160,69,65,21491,19979,35282,25552,37266)) + ".bat")
+    $launcher = Get-LauncherPath
     Write-TipLog "INFO" "Client update verified; updater will take over" @{
       currentVersion = $Script:Version
       nextVersion = [string]$Manifest.version
@@ -946,6 +1092,7 @@ function Start-TipWindow {
   Ensure-ClientId
   Save-Config
   Stop-OtherDesktopTipClientInstances | Out-Null
+  Initialize-DesktopTipLauncher
 
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName System.Drawing
@@ -1044,13 +1191,33 @@ function Start-TipWindow {
   $form.Controls.Add($dismissButton)
 
   $exitMenu = New-Object System.Windows.Forms.ContextMenuStrip
+  $menuVersionItem = $exitMenu.Items.Add((TextFromCodes @(69,65,32,26700,38754,25552,37266,32,86)) + $Script:Version)
+  $menuVersionItem.Enabled = $false
+  [void]$exitMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
   $sendItem = $exitMenu.Items.Add((TextFromCodes @(21457,36865,36890,30693)))
   $sendItem.Add_Click({ Show-SendNotificationWindow })
+  $autoStartItem = $exitMenu.Items.Add((TextFromCodes @(24320,26426,33258,21160,21551,21160)))
+  $autoStartItem.CheckOnClick = $false
+  $autoStartItem.Checked = Test-DesktopTipAutoStart
+  $autoStartItem.Add_Click({
+    try {
+      Set-DesktopTipAutoStart -Enabled (-not (Test-DesktopTipAutoStart))
+      $autoStartItem.Checked = Test-DesktopTipAutoStart
+    } catch {
+      Write-TipLog "WARN" "Desktop tip autostart toggle failed" @{
+        message = $_.Exception.Message
+      }
+      [System.Windows.Forms.MessageBox]::Show((TextFromCodes @(24320,26426,33258,21160,21551,21160,35774,32622,22833,36133,12290)) + "`n$($_.Exception.Message)", (TextFromCodes @(69,65,32,26700,38754,25552,37266)), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+    }
+  })
   $updateItem = $exitMenu.Items.Add((TextFromCodes @(26816,26597,26356,26032)))
   $updateItem.Add_Click({ Check-ClientUpdate -Interactive })
   $exitItem = $exitMenu.Items.Add((TextFromCodes @(0x9000,0x51FA,0x20,0x45,0x41,0x20,0x54,0x69,0x70,0x73)))
   $exitItem.Add_Click({ $form.Close() })
   $form.ContextMenuStrip = $exitMenu
+  $exitMenu.Add_Opening({
+    $autoStartItem.Checked = Test-DesktopTipAutoStart
+  })
 
   function Move-ToBottomRight {
     param([int]$Width, [int]$Height)
@@ -1260,6 +1427,15 @@ if ($SelfTest) {
 if ($Once) {
   Run-Once
   exit 0
+}
+
+if ($LauncherMigrationTest) {
+  if (Ensure-DesktopTipLauncher) {
+    Write-Output ("launcher-migration-ok path=" + (Get-LauncherPath))
+    exit 0
+  }
+  Write-Error "launcher-migration-failed"
+  exit 1
 }
 
 if ($SingleInstanceProbe) {
