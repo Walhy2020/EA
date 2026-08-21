@@ -11,31 +11,38 @@ if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
 }
 
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
-$scriptPath = Join-Path $ProjectDir "scripts\start.cmd"
-$supervisorPath = Join-Path $ProjectDir "scripts\ea-supervisor.ps1"
-if (-not (Test-Path $scriptPath)) {
-    throw "start.cmd not found: $scriptPath"
-}
-if (-not (Test-Path $supervisorPath)) {
-    throw "ea-supervisor.ps1 not found: $supervisorPath"
+$launcherPath = Join-Path $ProjectDir "tools\ea-launcher\OutPackage\EA.exe"
+if (-not (Test-Path -LiteralPath $launcherPath)) {
+    throw "EA launcher was not found: $launcherPath. Run npm run build:ea-launcher first."
 }
 
-$action = New-ScheduledTaskAction -Execute $scriptPath -WorkingDirectory $ProjectDir
+$launcherArguments = "--background --project-dir `"$ProjectDir`""
+$action = New-ScheduledTaskAction -Execute $launcherPath -Argument $launcherArguments -WorkingDirectory $ProjectDir
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew
 
 try {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description "Start EA at logon and restart it after unexpected exits." -Force
+    $startupLink = Join-Path ([Environment]::GetFolderPath("Startup")) "$TaskName.lnk"
+    Remove-Item -LiteralPath $startupLink -Force -ErrorAction SilentlyContinue
     Write-Host "Installed scheduled task: $TaskName"
     Write-Host "Project directory: $ProjectDir"
-    Write-Host "Restart policy: once per minute, up to 999 unexpected exits, single instance only."
+    Write-Host "Launcher: $launcherPath"
+    Write-Host "EA runs without a console and is monitored by the tray launcher."
     return
 } catch {
-    $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    $launchCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$supervisorPath`""
-    New-ItemProperty -Path $runKey -Name $TaskName -PropertyType String -Value $launchCommand -Force | Out-Null
-    Write-Host "Scheduled task registration was denied; installed current-user startup fallback."
-    Write-Host "Startup value: $TaskName"
+    $startupDir = [Environment]::GetFolderPath("Startup")
+    $startupLink = Join-Path $startupDir "$TaskName.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($startupLink)
+    $shortcut.TargetPath = $launcherPath
+    $shortcut.Arguments = $launcherArguments
+    $shortcut.WorkingDirectory = $ProjectDir
+    $shortcut.IconLocation = "$launcherPath,0"
+    $shortcut.Description = "EA background launcher"
+    $shortcut.Save()
+    Write-Host "Scheduled task registration was denied; installed the current-user Startup shortcut."
+    Write-Host "Startup shortcut: $startupLink"
     Write-Host "Project directory: $ProjectDir"
-    Write-Host "Supervisor checks port 39200 every 30 seconds, starts EA immediately when it is down, and retries failed starts after one minute."
+    Write-Host "The EXE starts with Windows, checks EA every 30 seconds, and restarts it without a console when needed."
 }

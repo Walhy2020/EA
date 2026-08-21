@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "projectDirRelative": "../../..",
+  "nodeExecutable": "node.exe",
+  "port": 39200,
+  "httpsEnabled": true,
+  "adminUrl": "https://com.veryeazy.com:39200/",
+  "pollSeconds": 30,
+  "startupTimeoutSeconds": 30,
+  "restartDelaySeconds": 3,
+  "autoRestart": true,
+  "autoStartWithWindows": true
+}
