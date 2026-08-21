@@ -304,6 +304,13 @@ function senderFromFrame(frame) {
   const from = plainObject(body.from);
   const sender = plainObject(body.sender);
   const user = plainObject(body.user);
+  const chat = plainObject(body.chat);
+  const chatInfo = plainObject(body.chat_info || body.chatInfo);
+  const conversation = plainObject(body.conversation);
+  const group = plainObject(body.group);
+  const groupInfo = plainObject(body.group_info || body.groupInfo);
+  const room = plainObject(body.room);
+  const roomInfo = plainObject(body.room_info || body.roomInfo);
 
   return {
     source: "wecom-smart-bot",
@@ -315,13 +322,46 @@ function senderFromFrame(frame) {
       body.groupname,
       body.group_name,
       body.roomname,
-      body.room_name
+      body.room_name,
+      chat.name,
+      chat.display_name,
+      chat.displayName,
+      chatInfo.name,
+      chatInfo.display_name,
+      chatInfo.displayName,
+      conversation.name,
+      conversation.display_name,
+      conversation.displayName,
+      group.name,
+      group.display_name,
+      group.displayName,
+      groupInfo.name,
+      groupInfo.display_name,
+      groupInfo.displayName,
+      room.name,
+      room.display_name,
+      room.displayName,
+      roomInfo.name,
+      roomInfo.display_name,
+      roomInfo.displayName
     ),
     groupName: firstString(
       body.groupname,
       body.group_name,
       body.chatname,
-      body.chat_name
+      body.chat_name,
+      group.name,
+      group.display_name,
+      group.displayName,
+      groupInfo.name,
+      groupInfo.display_name,
+      groupInfo.displayName,
+      chat.name,
+      chat.display_name,
+      chat.displayName,
+      chatInfo.name,
+      chatInfo.display_name,
+      chatInfo.displayName
     ),
     userId: firstString(
       body.userid,
@@ -1082,7 +1122,14 @@ function createWecomBotServer(options) {
       const content = textFromFrame(frame);
       const receivedAt = new Date().toISOString();
       const sender = senderFromFrame(frame);
-      logger.info("WeCom text message received", { length: content.length });
+      logger.info("WeCom text message received", {
+        length: content.length,
+        chatType: sender.chatType || "",
+        hasChatId: Boolean(sender.chatId),
+        hasChatName: Boolean(sender.chatName),
+        chatNameLength: sender.chatName ? sender.chatName.length : 0,
+        bodyKeys: limitedKeys(frame && frame.body, 30)
+      });
       let processingReply = null;
       try {
         if (desktopTip && typeof desktopTip.captureWecomGroupBindingMessage === "function") {
@@ -1100,6 +1147,8 @@ function createWecomBotServer(options) {
               ok: Boolean(desktopTipGroupResult.ok),
               chatType: sender.chatType || "",
               hasChatId: Boolean(sender.chatId),
+              hasChatName: Boolean(sender.chatName),
+              chatNameLength: sender.chatName ? sender.chatName.length : 0,
               hasUserId: Boolean(sender.userId),
               replyStarted: Boolean(reply && reply.streamId)
             });

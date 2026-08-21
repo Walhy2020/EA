@@ -111,7 +111,7 @@ function createHarness(fetchHandler) {
 function statusWithRegisteredClients(count) {
   return {
     ok: true,
-    app: { version: "0.6.68" },
+    app: { version: "0.6.69" },
     config: { server: { host: "127.0.0.1", port: 39200 } },
     modules: {
       rank: { files: {} },

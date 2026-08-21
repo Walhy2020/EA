@@ -56,7 +56,7 @@ function createModule(root, overrides = {}) {
     moduleConfig: {
       enabled: true,
       name: "EA 桌面提醒",
-      version: "0.4.2",
+      version: "0.4.3",
       storePath: tempFile(root, "events.json"),
       ttlMinutes: 240,
       clientRegistry: {
@@ -885,6 +885,16 @@ function runWecomGroupRegistryTests() {
   assert.equal(realCallbackSender.chatId, "chat_from_real_callback", "real WeCom group callback chatid must be parsed");
   assert.equal(realCallbackSender.userId, "callback_sender", "real WeCom group callback sender userid must be parsed from from.userid");
   assert.equal(realCallbackSender.chatName, "真实回调群名", "real WeCom group callback chat name must be parsed when available");
+  const nestedCallbackSender = senderFromFrame({
+    body: {
+      chattype: "group",
+      chatid: "chat_from_nested_callback",
+      chat_info: { name: "嵌套群名" },
+      from: { userid: "callback_sender" },
+      text: { content: "@1号机器人 绑定M04通知群" }
+    }
+  });
+  assert.equal(nestedCallbackSender.chatName, "嵌套群名", "non-standard nested callback chat name must be parsed when available");
 
   let result = module.captureWecomGroupBindingMessage({
     text: "@1号机器人 绑定M04通知群 正式服通知群",
@@ -921,6 +931,7 @@ function runWecomGroupRegistryTests() {
   assert.equal(result.ok, true, "valid group callback must bind group");
   assert.equal(result.action, "bind");
   assert.match(result.group.displayName, /正式服通知群/);
+  assert.equal(result.group.baseDisplayName, "正式服通知群");
   assert.equal(pollDevice(module, "binding_check_client", "0.3.4").length, 0, "binding command must only update configuration and must not create desktop notification");
   assert.equal(Object.prototype.hasOwnProperty.call(result.group, "chatId"), false, "registry status must not expose raw chatid");
   const groupId = result.group.groupId;
@@ -938,6 +949,70 @@ function runWecomGroupRegistryTests() {
   assert.equal(result.idempotent, true, "repeat bind must be idempotent");
   assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 1);
 
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 新正式服通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.idempotent, true, "repeat bind must keep same group id");
+  assert.equal(result.nameUpdated, true, "repeat bind with an explicit name must update group name");
+  assert.match(result.message, /已更新/);
+  assert.equal(result.group.displayName, "新正式服通知群");
+
+  result = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_formal_ops",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(result.group.displayName, "新正式服通知群", "repeat bind without callback/name must preserve existing display name and must not use sender name as group name");
+
+  const callbackNameBind = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_callback_name",
+      chatName: "真实群名",
+      userId: "bind_user",
+      name: "Bind User"
+    }
+  });
+  assert.equal(callbackNameBind.ok, true);
+  assert.equal(callbackNameBind.group.displayName, "真实群名", "callback chat name must be saved when command has no explicit name");
+
+  const fallbackBind = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群",
+    sender: {
+      chatType: "group",
+      chatId: "chat_fallback_name",
+      userId: "bind_user",
+      name: ""
+    }
+  });
+  assert.match(fallbackBind.group.displayName, /^M04通知群-[a-f0-9]{8}$/i, "missing callback/name must use stable non-fake fallback display name");
+
+  const duplicateA = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 同名群",
+    sender: { chatType: "group", chatId: "chat_duplicate_a", userId: "bind_user", name: "Bind User" }
+  });
+  const duplicateB = module.captureWecomGroupBindingMessage({
+    text: "@1号机器人 绑定M04通知群 同名群",
+    sender: { chatType: "group", chatId: "chat_duplicate_b", userId: "bind_user", name: "Bind User" }
+  });
+  assert.match(duplicateA.group.displayName, /同名群/);
+  assert.match(duplicateB.group.displayName, /同名群（…[A-F0-9]{4}）/);
+  const duplicateStatus = module.getStatus().wecomGroupRegistry.groups.filter((group) => group.baseDisplayName === "同名群");
+  assert.equal(duplicateStatus.length, 2);
+  assert.notEqual(duplicateStatus[0].displayName, duplicateStatus[1].displayName, "duplicate group names must be disambiguated in admin-facing status");
+
   const targets = module.resolveWecomGroupTargets([{ groupId, mentionMode: "all" }]);
   assert.equal(targets.length, 1);
   assert.equal(targets[0].chatId, "chat_formal_ops", "send adapter must resolve raw chatid internally");
@@ -946,7 +1021,9 @@ function runWecomGroupRegistryTests() {
 
   module.stop();
   module = createModule(root);
-  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 1, "group registry must recover after restart");
+  const restartStatus = module.getStatus().wecomGroupRegistry;
+  assert.ok(restartStatus.groups.some((group) => group.groupId === groupId), "group registry must recover bound group after restart");
+  const restartGroupCount = restartStatus.groupCount;
 
   result = module.captureWecomGroupBindingMessage({
     text: "@1号机器人 解绑M04通知群",
@@ -959,7 +1036,7 @@ function runWecomGroupRegistryTests() {
   });
   assert.equal(result.ok, true, "unbind command must succeed from the same real group callback");
   assert.equal(result.action, "unbind");
-  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, 0);
+  assert.equal(module.getStatus().wecomGroupRegistry.groupCount, restartGroupCount - 1);
 
   result = module.captureWecomGroupBindingMessage({
     text: "@1号机器人 解绑M04通知群",

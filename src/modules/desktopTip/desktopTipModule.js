@@ -6,7 +6,7 @@ const path = require("path");
 const { resolveProjectPath } = require("../../utils/paths");
 const { createProductionMaintenanceManager } = require("./productionMaintenance");
 
-const DEFAULT_VERSION = "0.4.2";
+const DEFAULT_VERSION = "0.4.3";
 const TERMINAL_ACTIONS = new Set(["dismissed", "opened", "done"]);
 const MANUAL_MESSAGE_SOURCE_KEY = "admin_manual_message";
 const CLIENT_MANUAL_MESSAGE_SOURCE_KEY = "client_manual_message";
@@ -174,6 +174,29 @@ function groupRegistryId(chatId) {
 
 function normalizeGroupDisplayName(value) {
   return trimText(value).replace(/\s+/g, " ").slice(0, 40);
+}
+
+function shortHash(value) {
+  return crypto
+    .createHash("sha1")
+    .update(String(value || ""))
+    .digest("hex")
+    .slice(0, 8);
+}
+
+function fallbackGroupDisplayName(chatId) {
+  return `M04通知群-${shortHash(chatId)}`;
+}
+
+function groupDisplaySuffix(chatId) {
+  return `…${shortHash(chatId).slice(0, 4).toUpperCase()}`;
+}
+
+function groupBaseDisplayName(group) {
+  if (!group) {
+    return "";
+  }
+  return normalizeGroupDisplayName(group && group.displayName) || fallbackGroupDisplayName(group && group.chatId);
 }
 
 function readWecomGroupRegistryFile(filePath, fallback, logger, configStorePath) {
@@ -419,17 +442,34 @@ function createDesktopTipModule(options = {}) {
   }
 
   function activeWecomGroups() {
-    return wecomGroupRegistryState.groups
+    const groups = wecomGroupRegistryState.groups
       .filter((group) => group && group.active !== false && trimText(group.chatId))
       .map((group) => ({
+        group,
         groupId: trimText(group.groupId) || groupRegistryId(group.chatId),
-        displayName: normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(group.chatId)}`,
-        source: "wecom_smart_bot_group_callback",
-        boundAt: trimText(group.boundAt),
-        boundByName: trimText(group.boundByName),
-        hasChatId: Boolean(trimText(group.chatId)),
-        updatedAt: trimText(group.updatedAt)
+        baseDisplayName: groupBaseDisplayName(group)
       }));
+    const nameCounts = new Map();
+    for (const group of groups) {
+      const key = lowerText(group.baseDisplayName);
+      nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+    }
+    return groups
+      .map(({ group, groupId, baseDisplayName }) => {
+        const duplicateName = (nameCounts.get(lowerText(baseDisplayName)) || 0) > 1;
+        const suffix = groupDisplaySuffix(group.chatId);
+        return {
+          groupId,
+          displayName: duplicateName ? `${baseDisplayName}（${suffix}）` : baseDisplayName,
+          baseDisplayName,
+          displaySuffix: suffix,
+          source: "wecom_smart_bot_group_callback",
+          boundAt: trimText(group.boundAt),
+          boundByName: trimText(group.boundByName),
+          hasChatId: Boolean(trimText(group.chatId)),
+          updatedAt: trimText(group.updatedAt)
+        };
+      });
   }
 
   function getWecomGroupRegistryStatus() {
@@ -458,10 +498,12 @@ function createDesktopTipModule(options = {}) {
     const nowIso = new Date().toISOString();
     const groupId = groupRegistryId(chatId);
     const requestedName = normalizeGroupDisplayName(input.displayName);
-    const callbackName = normalizeGroupDisplayName(sender.chatName || sender.groupName || sender.name);
-    const displayName = requestedName || callbackName || `M04通知群-${shortHash(chatId)}`;
+    const callbackName = normalizeGroupDisplayName(sender.chatName || sender.groupName);
+    const nextDisplayName = requestedName || callbackName;
+    const displayNameSource = requestedName ? "command" : (callbackName ? "callback" : "fallback");
     let group = wecomGroupRegistryState.groups.find((item) => trimText(item.groupId) === groupId || lowerText(item.chatId) === lowerText(chatId));
     const isNew = !group;
+    const previousDisplayName = groupBaseDisplayName(group);
     if (!group) {
       if (activeWecomGroups().length >= config.wecomGroupRegistry.maxGroups) {
         throw createHttpError(409, `M04 通知群数量已达到上限 ${config.wecomGroupRegistry.maxGroups}`);
@@ -469,7 +511,8 @@ function createDesktopTipModule(options = {}) {
       group = {
         groupId,
         chatId,
-        displayName,
+        displayName: nextDisplayName || fallbackGroupDisplayName(chatId),
+        displayNameSource,
         active: true,
         boundAt: nowIso,
         boundByUserId: trimText(sender.userId),
@@ -480,7 +523,13 @@ function createDesktopTipModule(options = {}) {
     } else {
       group.groupId = groupId;
       group.chatId = chatId;
-      group.displayName = displayName || normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(chatId)}`;
+      if (nextDisplayName) {
+        group.displayName = nextDisplayName;
+        group.displayNameSource = displayNameSource;
+      } else {
+        group.displayName = normalizeGroupDisplayName(group.displayName) || fallbackGroupDisplayName(chatId);
+        group.displayNameSource = group.displayNameSource || "fallback";
+      }
       group.active = true;
       group.updatedAt = nowIso;
       group.updatedByUserId = trimText(sender.userId);
@@ -489,12 +538,18 @@ function createDesktopTipModule(options = {}) {
       if (!group.boundByUserId) group.boundByUserId = trimText(sender.userId);
       if (!group.boundByName) group.boundByName = trimText(sender.name);
     }
+    const activeGroup = activeWecomGroups().find((item) => item.groupId === groupId) || {};
+    const nameUpdated = !isNew && previousDisplayName !== groupBaseDisplayName(group);
     saveWecomGroupRegistry();
     if (logger && typeof logger.info === "function") {
       logger.info("Desktop tip WeCom group bound", {
         sourceKey: WECOM_GROUP_REGISTRY_SOURCE_KEY,
         groupId,
         displayNameLength: group.displayName.length,
+        displayNameSource: group.displayNameSource || "",
+        nameUpdated,
+        hasCallbackName: Boolean(callbackName),
+        hasRequestedName: Boolean(requestedName),
         isNew,
         operatorUserId: maskLogId(sender.userId),
         chatId: maskLogId(chatId),
@@ -506,10 +561,13 @@ function createDesktopTipModule(options = {}) {
       handled: true,
       action: "bind",
       idempotent: !isNew,
-      group: activeWecomGroups().find((item) => item.groupId === groupId),
+      nameUpdated,
+      group: activeGroup,
       message: isNew
-        ? `已绑定 M04 通知群：${group.displayName}`
-        : `M04 通知群已绑定，无需重复操作：${group.displayName}`
+        ? `已绑定 M04 通知群：${activeGroup.displayName || group.displayName}`
+        : (nameUpdated
+          ? `已更新 M04 通知群名称：${activeGroup.displayName || group.displayName}`
+          : `M04 通知群已绑定：${activeGroup.displayName || group.displayName}`)
     };
   }
 
@@ -586,7 +644,8 @@ function createDesktopTipModule(options = {}) {
       return {
         groupId,
         chatId: trimText(group.chatId),
-        displayName: normalizeGroupDisplayName(group.displayName) || `M04通知群-${shortHash(group.chatId)}`,
+        displayName: (activeWecomGroups().find((item) => item.groupId === groupId) || {}).displayName
+          || groupBaseDisplayName(group),
         mentionMode
       };
     });
