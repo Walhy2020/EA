@@ -2855,7 +2855,10 @@ function createWatchdogModule(options = {}) {
       },
       horizontal_content_list: contents.filter(Boolean),
       sub_title_text: "这条任务已停止盯梢。",
-      card_action: { type: 0 }
+      card_action: {
+        type: 1,
+        url: "https://work.weixin.qq.com"
+      }
     };
   }
 

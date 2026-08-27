@@ -270,6 +270,8 @@ async function main() {
       && message.messageType === "template_card"
       && message.templateCard.main_title.title === "盯梢已完成"
       && message.templateCard.sub_title_text === "这条任务已停止盯梢。"
+      && message.templateCard.card_action.type === 1
+      && message.templateCard.card_action.url === "https://work.weixin.qq.com"
       && !message.templateCard.button_list
     )));
 
