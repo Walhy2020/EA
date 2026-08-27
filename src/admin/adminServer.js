@@ -1398,6 +1398,7 @@ function createAdminServer(options) {
         logger.info("Watchdog app feedback submitted", {
           taskId: body.taskId || "",
           action: body.action || "",
+          noteLength: String(body.note || "").trim().length,
           ok: Boolean(result.ok)
         });
         sendJson(res, result.ok ? 200 : 400, result);

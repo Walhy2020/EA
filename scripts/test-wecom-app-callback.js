@@ -275,6 +275,75 @@ async function main() {
     assert.equal(sentReminders[0].messageType, undefined);
     assert.match(sentReminders[0].text, /反馈按钮正在升级/);
     assert.equal(JSON.stringify(sentReminders[0]).includes("watchdog-feedback"), false);
+
+    const linkedReminderStoreFile = path.join(directory, "linked-reminder-tasks.json");
+    fs.writeFileSync(linkedReminderStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_linked_reminder", {
+        nextRunAt: "2026-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z"
+      })],
+      drafts: []
+    }, null, 2)}\n`, "utf8");
+    const linkedMessages = [];
+    const linkedReminderWatchdog = createWatchdogModule({
+      storeFile: linkedReminderStoreFile,
+      moduleConfig: { enabled: true, appPush: { enabled: true, nativeCard: { enabled: true } } },
+      appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
+      appNotifier: {
+        getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
+        send: async (message) => {
+          linkedMessages.push(message);
+          return { ok: true, msgid: `linked-${linkedMessages.length}` };
+        }
+      },
+      logger: { info() {}, warn() {} }
+    });
+    await linkedReminderWatchdog.tick();
+    assert.equal(linkedMessages.length, 1);
+    assert.equal(linkedMessages[0].messageType, "template_card");
+    const linkedCard = linkedMessages[0].templateCard;
+    const descriptionEntry = linkedCard.horizontal_content_list.find((item) => item.keyname === "当前情况说明");
+    assert.ok(descriptionEntry);
+    assert.equal(descriptionEntry.value, "点击填写");
+    assert.equal(descriptionEntry.type, 1);
+    assert.equal(linkedCard.card_action.url, descriptionEntry.url);
+    const descriptionUrl = new URL(descriptionEntry.url);
+    assert.equal(descriptionUrl.searchParams.get("taskId"), "wd_linked_reminder");
+    const feedbackToken = descriptionUrl.searchParams.get("token");
+    assert.ok(feedbackToken);
+
+    const feedbackView = linkedReminderWatchdog.getAppFeedbackTask({
+      taskId: "wd_linked_reminder",
+      token: feedbackToken
+    });
+    assert.equal(feedbackView.ok, true);
+    const overlong = await linkedReminderWatchdog.submitAppFeedback({
+      taskId: "wd_linked_reminder",
+      token: feedbackToken,
+      action: "progress",
+      note: "进".repeat(501)
+    });
+    assert.equal(overlong.ok, false);
+    assert.match(overlong.message, /不能超过 500 字/);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").responses.length, 0);
+
+    const feedback = await linkedReminderWatchdog.submitAppFeedback({
+      taskId: "wd_linked_reminder",
+      token: feedbackToken,
+      action: "progress",
+      note: "联调完成，正在观察运行情况"
+    });
+    assert.equal(feedback.ok, true);
+    const linkedTask = taskById(linkedReminderStoreFile, "wd_linked_reminder");
+    assert.equal(linkedTask.responses.length, 1);
+    assert.equal(linkedTask.responses[0].note, "联调完成，正在观察运行情况");
+    assert.equal(linkedTask.lastFeedbackNote, "联调完成，正在观察运行情况");
+    assert.ok(linkedMessages.some((message) => (
+      message.purpose === "watchdog_result_notice"
+      && /说明：联调完成，正在观察运行情况/.test(message.text)
+    )));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

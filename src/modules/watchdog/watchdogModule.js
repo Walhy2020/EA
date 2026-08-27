@@ -25,6 +25,7 @@ const DEFAULT_SEND_QUEUE_FAILURE_BACKOFF_MS = 2 * 60 * 1000;
 const DEFAULT_SEND_QUEUE_MAX_SENDS_PER_TICK = 1;
 const DEFAULT_SEND_QUEUE_BATCH_SUMMARY_COOLDOWN_MS = 30 * 60 * 1000;
 const APP_FEEDBACK_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+const APP_FEEDBACK_NOTE_MAX_LENGTH = 500;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
 const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
@@ -2560,6 +2561,7 @@ function createWatchdogModule(options = {}) {
 
   function appNativeReminderCard(task, tipType) {
     const isInitial = tipType === "watchdog_initial";
+    const feedbackUrl = isInitial ? "" : appFeedbackUrlForTask(task);
     const contents = [
       watchdogTaskIdCardItem(task),
       { keyname: "发起人", value: requesterDisplayName(task) },
@@ -2567,6 +2569,14 @@ function createWatchdogModule(options = {}) {
     ];
     const remark = remarkCardItem(task);
     if (remark) contents.push(remark);
+    if (feedbackUrl) {
+      contents.push({
+        keyname: "当前情况说明",
+        value: "点击填写",
+        type: 1,
+        url: feedbackUrl
+      });
+    }
     return {
       card_type: "button_interaction",
       source: { desc: "EA盯梢", desc_color: 0 },
@@ -2574,6 +2584,12 @@ function createWatchdogModule(options = {}) {
         title: appPushHeadline(tipType),
         desc: truncate(task.content, 60)
       },
+      ...(feedbackUrl ? {
+        card_action: {
+          type: 1,
+          url: feedbackUrl
+        }
+      } : {}),
       horizontal_content_list: contents.filter(Boolean),
       button_list: isInitial
         ? [
@@ -3090,6 +3106,22 @@ function createWatchdogModule(options = {}) {
 
     const action = normalizeText(input.action).toLowerCase();
     const note = normalizeText(input.note);
+    if (note.length > APP_FEEDBACK_NOTE_MAX_LENGTH) {
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app feedback note rejected because it is too long", {
+          taskId: task.id,
+          action,
+          assigneeUserId: task.assigneeUserId || "",
+          noteLength: note.length,
+          maxLength: APP_FEEDBACK_NOTE_MAX_LENGTH
+        });
+      }
+      return {
+        ok: false,
+        message: `当前情况说明不能超过 ${APP_FEEDBACK_NOTE_MAX_LENGTH} 字。`,
+        task: appFeedbackTaskView(task)
+      };
+    }
     const sender = {
       userId: task.assigneeUserId || "",
       name: task.assigneeName || task.assigneeUserId || "",
