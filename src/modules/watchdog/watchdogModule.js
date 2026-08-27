@@ -2701,12 +2701,19 @@ function createWatchdogModule(options = {}) {
         title: appPushHeadline(tipType),
         desc: truncate(task.content, 60)
       },
-      card_action: { type: 0 },
+      card_action: feedbackUrl
+        ? { type: 1, url: feedbackUrl }
+        : { type: 1, url: "https://work.weixin.qq.com" },
       horizontal_content_list: contents.filter(Boolean),
       task_id: cardTaskId
     };
     if (feedbackUrl) {
-      card.jump_list = [{ title: "详情", type: 1, url: feedbackUrl }];
+      card.horizontal_content_list.push({
+        keyname: "详情",
+        value: "查看反馈记录",
+        type: 1,
+        url: feedbackUrl
+      });
     }
     if (!received) {
       card.button_list = [{ text: "收到", key: "ea_watch_card_received", style: 1 }];

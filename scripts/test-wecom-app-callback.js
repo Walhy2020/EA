@@ -282,13 +282,15 @@ async function main() {
     assert.equal(receivedUpdate.card_type, "text_notice");
     assert.equal(receivedUpdate.source.desc, "EA盯梢 · 已收到");
     assert.equal(receivedUpdate.source.desc_color, 3);
-    assert.equal(receivedUpdate.card_action.type, 0);
+    assert.equal(receivedUpdate.card_action.type, 1);
+    assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.equal(receivedUpdate.button_list, undefined);
     assert.equal(receivedUpdate.task_id, "ea_watch_wd_receipt_21");
-    assert.equal(receivedUpdate.jump_list.length, 1);
-    assert.equal(receivedUpdate.jump_list[0].title, "详情");
-    assert.equal(receivedUpdate.jump_list[0].type, 1);
-    assert.match(receivedUpdate.jump_list[0].url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
+    assert.equal(receivedUpdate.jump_list, undefined);
+    const receivedDetail = receivedUpdate.horizontal_content_list.find((item) => item.keyname === "详情");
+    assert.equal(receivedDetail.value, "查看反馈记录");
+    assert.equal(receivedDetail.type, 1);
+    assert.equal(receivedDetail.url, receivedUpdate.card_action.url);
 
     const duplicateReceipt = await sendEvent({ taskId: "ea_watch_wd_receipt_21", eventKey: "ea_watch_card_received" });
     assert.equal(duplicateReceipt.statusCode, 200);
@@ -441,15 +443,17 @@ async function main() {
     assert.equal(linkedCard.button_selection, undefined);
     assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
     assert.equal(linkedCard.source.desc_color, 2);
-    assert.equal(linkedCard.card_action.type, 0);
-    assert.equal(linkedCard.card_action.url, undefined);
+    assert.equal(linkedCard.card_action.type, 1);
+    assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.deepEqual(linkedCard.button_list, [
       { text: "收到", key: "ea_watch_card_received", style: 1 }
     ]);
-    assert.equal(linkedCard.jump_list.length, 1);
-    assert.equal(linkedCard.jump_list[0].title, "详情");
-    assert.equal(linkedCard.jump_list[0].type, 1);
-    const feedbackAuthorizeUrl = new URL(linkedCard.jump_list[0].url);
+    assert.equal(linkedCard.jump_list, undefined);
+    const linkedDetail = linkedCard.horizontal_content_list.find((item) => item.keyname === "详情");
+    assert.equal(linkedDetail.value, "查看反馈记录");
+    assert.equal(linkedDetail.type, 1);
+    assert.equal(linkedDetail.url, linkedCard.card_action.url);
+    const feedbackAuthorizeUrl = new URL(linkedDetail.url);
     assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
     assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");
     assert.equal(feedbackAuthorizeUrl.searchParams.get("appid"), corpId);
@@ -469,8 +473,8 @@ async function main() {
     assert.equal(feedbackCardUrl.searchParams.has("token"), false);
     assert.equal(feedbackCardUrl.searchParams.get("ref"), appFeedbackRefForTaskId("wd_linked_reminder"));
     assert.equal(feedbackCardUrl.hash, "");
-    assert.equal(linkedCard.jump_list[0].url.includes("wd_linked_reminder"), false);
-    assert.equal(linkedCard.jump_list[0].url.includes("legacy-feedback-token"), false);
+    assert.equal(linkedDetail.url.includes("wd_linked_reminder"), false);
+    assert.equal(linkedDetail.url.includes("legacy-feedback-token"), false);
     assert.equal(linkedCard.horizontal_content_list.some((item) => item.keyname === "当前情况说明"), false);
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
