@@ -1345,8 +1345,9 @@ function rejectReasonNoticeText(task) {
 
 function resultNoticeText(task, label) {
   const assignee = task.assigneeName || task.assigneeUserId || "未知";
+  const headline = task.status === "completed" ? "【EA盯梢已完成】" : "【EA盯梢反馈】";
   const nextText = task.status === "completed"
-    ? "状态：已停止盯梢"
+    ? "状态：已完成，盯梢已停止"
     : task.awaitingRescheduleFrom
       ? "状态：等待补充下次盯梢时间\n操作：可点反馈卡片里的“填写下次时间”，或直接回复“下次盯梢时间 6月24日 16:00”"
       : task.nextRunAt
@@ -1356,7 +1357,7 @@ function resultNoticeText(task, label) {
     ? ""
     : "如需修改备注，可直接回复：备注：新的备注内容。";
   return [
-    "【EA盯梢反馈】",
+    headline,
     `**任务：${task.content}**`,
     `**${assignee}** 反馈：**${label}**`,
     remarkLine(task),
@@ -1985,7 +1986,39 @@ function createWatchdogModule(options = {}) {
     return Boolean(task
       && task.status === "active"
       && task.requesterTargetId
-      && !task.controlCardSentAt);
+      && !task.controlCardSentAt
+      && !controlCardSkipReason(task));
+  }
+
+  function controlCardSkipReason(task, nowMs = Date.now()) {
+    if (!task || task.status !== "active") {
+      return `task_${normalizeText(task && task.status) || "missing"}`;
+    }
+    if (!isOneTimeTask(task)) {
+      return "";
+    }
+    const dueAtMs = dateValueMs(task.dueAt || task.nextRunAt);
+    return dueAtMs && dueAtMs <= nowMs ? "one_time_due_reached" : "";
+  }
+
+  function markControlCardSkipped(task, reason) {
+    const now = new Date().toISOString();
+    task.controlCardSkippedAt = now;
+    task.controlCardSkipReason = reason;
+    task.controlCardRetryAt = "";
+    task.controlCardQueuedAt = "";
+    task.controlCardLastError = "";
+    task.updatedAt = now;
+    save();
+    if (logger && typeof logger.info === "function") {
+      logger.info("Watchdog control card skipped", {
+        taskId: task.id,
+        mode: task.mode || "",
+        status: task.status || "",
+        dueAt: task.dueAt || "",
+        reason
+      });
+    }
   }
 
   function ensurePendingControlCardRetries() {
@@ -2445,6 +2478,19 @@ function createWatchdogModule(options = {}) {
       await waitForWatchdogSendSlot(messageType, targetId, dispatchMeta);
       try {
         const ack = await deliver();
+        if (ack && ack.skipped) {
+          if (logger && typeof logger.info === "function") {
+            logger.info("Watchdog send queue delivery skipped", {
+              messageType,
+              targetId: targetId || "",
+              taskId: meta.taskId || "",
+              queueId,
+              queueWaitMs,
+              reason: ack.skipReason || "delivery_preflight"
+            });
+          }
+          return ack;
+        }
         assertWeComAckOk(ack);
         noteWatchdogSendSuccess(messageType, targetId, ack, dispatchMeta);
         return ack;
@@ -2547,8 +2593,12 @@ function createWatchdogModule(options = {}) {
         }
         return "";
       }
-      url.searchParams.set("taskId", task.id);
-      url.searchParams.set("token", ensureAppFeedbackToken(task));
+      url.searchParams.delete("taskId");
+      url.searchParams.delete("token");
+      url.hash = new URLSearchParams({
+        taskId: task.id,
+        token: ensureAppFeedbackToken(task)
+      }).toString();
       return url.toString();
     } catch (error) {
       if (logger && typeof logger.warn === "function") {
@@ -2601,6 +2651,7 @@ function createWatchdogModule(options = {}) {
 
   function appNativeReminderCard(task, tipType) {
     const isInitial = tipType === "watchdog_initial";
+    const feedbackUrl = isInitial ? "" : appFeedbackUrlForTask(task);
     const contents = [
       watchdogTaskIdCardItem(task),
       { keyname: "发起人", value: requesterDisplayName(task) },
@@ -2608,6 +2659,9 @@ function createWatchdogModule(options = {}) {
     ];
     const remark = remarkCardItem(task);
     if (remark) contents.push(remark);
+    if (feedbackUrl) {
+      contents.push({ keyname: "当前情况说明", value: "点击卡片填写" });
+    }
     return {
       card_type: "button_interaction",
       source: { desc: "EA盯梢", desc_color: 0 },
@@ -2615,9 +2669,8 @@ function createWatchdogModule(options = {}) {
         title: appPushHeadline(tipType),
         desc: truncate(task.content, 60)
       },
-      card_action: { type: 0 },
+      card_action: feedbackUrl ? { type: 1, url: feedbackUrl } : { type: 0 },
       horizontal_content_list: contents.filter(Boolean),
-      ...(isInitial ? {} : { button_selection: appSituationSelection() }),
       button_list: isInitial
         ? [
             { text: "正在处理", key: "ea_watch_initial_received", style: 1 },
@@ -2772,6 +2825,7 @@ function createWatchdogModule(options = {}) {
 
   function appResultNoticeText(task, label, note = "") {
     const assignee = task.assigneeName || task.assigneeUserId || "未知";
+    const headline = task.status === "completed" ? "【EA盯梢已完成】" : "【EA盯梢反馈】";
     const nextText = task.status === "completed"
       ? "状态：已完成，盯梢已停止"
       : task.awaitingRescheduleFrom
@@ -2780,7 +2834,7 @@ function createWatchdogModule(options = {}) {
           ? `下次盯梢：${formatLocalMinute(task.nextRunAt)}`
           : "下次盯梢：待补充";
     return [
-      "【EA盯梢反馈】",
+      headline,
       `任务：${task.content || ""}`,
       `${assignee} 反馈：${label}`,
       taskRemarkText(task) ? `备注：${taskRemarkText(task)}` : "",
@@ -2788,6 +2842,29 @@ function createWatchdogModule(options = {}) {
       nextText,
       watchdogTaskIdLine(task)
     ].filter(Boolean).join("\n");
+  }
+
+  function appCompletedResultCard(task, label, note = "") {
+    const assignee = task.assigneeName || task.assigneeUserId || "未知";
+    const contents = [
+      watchdogTaskIdCardItem(task),
+      { keyname: "被盯梢人", value: assignee },
+      { keyname: "反馈结果", value: label || "已完成" }
+    ];
+    if (note) {
+      contents.push({ keyname: "当前情况", value: truncate(note, 80) });
+    }
+    return {
+      card_type: "text_notice",
+      source: { desc: "EA盯梢", desc_color: 3 },
+      main_title: {
+        title: "盯梢已完成",
+        desc: truncate(task.content || "", 60)
+      },
+      horizontal_content_list: contents.filter(Boolean),
+      sub_title_text: "这条任务已停止盯梢。",
+      card_action: { type: 0 }
+    };
   }
 
   function latestAppResultResponse(task) {
@@ -2826,9 +2903,15 @@ function createWatchdogModule(options = {}) {
     const note = normalizeText(options.note);
     const responseAt = options.responseAt || new Date().toISOString();
     try {
+      const completed = task.status === "completed";
       const result = await appNotifier.send({
         targetUserId: requesterUserId,
-        text: appResultNoticeText(task, label, note),
+        ...(completed
+          ? {
+            messageType: "template_card",
+            templateCard: appCompletedResultCard(task, label, note)
+          }
+          : { text: appResultNoticeText(task, label, note) }),
         purpose: "watchdog_result_notice"
       });
       if (!result || !result.ok) {
@@ -2850,6 +2933,7 @@ function createWatchdogModule(options = {}) {
           taskId: task.id,
           requesterUserId,
           label,
+          messageType: completed ? "template_card" : "text",
           responseAt,
           msgid: result.msgid || ""
         });
@@ -3288,7 +3372,15 @@ function createWatchdogModule(options = {}) {
       "template_card",
       targetId,
       meta,
-      () => robotServer.sendTemplateCardMessage(targetId, card)
+      () => {
+        const skipReason = typeof meta.skipBeforeSend === "function"
+          ? normalizeText(meta.skipBeforeSend())
+          : "";
+        if (skipReason) {
+          return { errcode: 0, skipped: true, skipReason };
+        }
+        return robotServer.sendTemplateCardMessage(targetId, card);
+      }
     );
   }
 
@@ -3387,12 +3479,22 @@ function createWatchdogModule(options = {}) {
     if (!task.requesterTargetId) {
       return null;
     }
+    const currentSkipReason = controlCardSkipReason(task);
+    if (currentSkipReason) {
+      markControlCardSkipped(task, currentSkipReason);
+      return { errcode: 0, skipped: true, skipReason: currentSkipReason };
+    }
     const cardTaskId = `ea_watch_control_${task.id}_${Date.now()}`;
     const card = createControlCard(task, cardTaskId);
     const ack = await sendTemplateCard(task.requesterTargetId, card, {
       taskId: task.id,
-      purpose: "control_card"
+      purpose: "control_card",
+      skipBeforeSend: () => controlCardSkipReason(task)
     });
+    if (ack && ack.skipped) {
+      markControlCardSkipped(task, ack.skipReason || "delivery_preflight");
+      return ack;
+    }
     task.controlCardTaskId = cardTaskId;
     task.controlCardSentAt = new Date().toISOString();
     task.controlCardRetryAt = "";
@@ -3431,8 +3533,61 @@ function createWatchdogModule(options = {}) {
         error: ""
       };
     }
+    const currentSkipReason = controlCardSkipReason(task);
+    if (currentSkipReason) {
+      markControlCardSkipped(task, currentSkipReason);
+      return {
+        sent: false,
+        queued: false,
+        skipped: true,
+        reason: currentSkipReason,
+        retryAt: "",
+        error: ""
+      };
+    }
+    const nowMs = Date.now();
+    const cadenceWaitMs = config.sendQueue.enabled
+      ? Math.max(0, lastWatchdogSendAt + config.sendQueue.minIntervalMs - nowMs)
+      : 0;
+    const backoffWaitMs = config.sendQueue.enabled ? sendQueueRemainingMs(nowMs, task.requesterTargetId) : 0;
+    if (config.sendQueue.enabled && (pendingWatchdogSendCount > 0 || cadenceWaitMs > 0 || backoffWaitMs > 0)) {
+      const retryDelayMs = Math.max(config.tickMs, cadenceWaitMs, backoffWaitMs, 1000);
+      const nowIso = new Date(nowMs).toISOString();
+      const retryAt = new Date(nowMs + retryDelayMs).toISOString();
+      task.controlCardRetryAt = retryAt;
+      task.controlCardQueuedAt = task.controlCardQueuedAt || nowIso;
+      task.controlCardLastError = "盯梢控制卡等待后台发送队列";
+      task.updatedAt = nowIso;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog control card deferred without blocking requester response", {
+          taskId: task.id,
+          pendingWatchdogSendCount,
+          cadenceWaitMs,
+          backoffWaitMs,
+          retryAt
+        });
+      }
+      return {
+        sent: false,
+        queued: true,
+        skipped: false,
+        retryAt,
+        error: ""
+      };
+    }
     try {
-      await sendControlCard(task);
+      const ack = await sendControlCard(task);
+      if (ack && ack.skipped) {
+        return {
+          sent: false,
+          queued: false,
+          skipped: true,
+          reason: ack.skipReason || "delivery_preflight",
+          retryAt: "",
+          error: ""
+        };
+      }
       return {
         sent: true,
         queued: false,
@@ -3486,6 +3641,12 @@ function createWatchdogModule(options = {}) {
     }
     if (result && result.queued) {
       return "盯梢控制卡已加入发送队列，后台会自动重试；仍可用文字取消盯梢。";
+    }
+    if (result && result.skipped && result.reason === "one_time_due_reached") {
+      return "一次性任务已到提醒时间，不再发送取消卡片。";
+    }
+    if (result && result.skipped) {
+      return "任务状态已变化，不再发送盯梢控制卡。";
     }
     return "盯梢控制卡暂时无法发送，仍可用文字取消盯梢。";
   }
@@ -3928,6 +4089,7 @@ function createWatchdogModule(options = {}) {
       return 0;
     }
     let sentCount = 0;
+    let skippedCount = 0;
     const tasks = pendingControlCardRetryTasks(nowMs);
     for (const [index, task] of tasks.entries()) {
       if (sentCount >= remainingSlots) {
@@ -3935,7 +4097,11 @@ function createWatchdogModule(options = {}) {
       }
       markRetryAttempt(task, "controlCardLastAttemptAt", "control_card_retry", index + 1, tasks.length);
       try {
-        await sendControlCard(task);
+        const ack = await sendControlCard(task);
+        if (ack && ack.skipped) {
+          skippedCount += 1;
+          continue;
+        }
         sentCount += 1;
         if (logger && typeof logger.info === "function") {
           logger.info("Watchdog control card retry sent", {
@@ -3969,10 +4135,11 @@ function createWatchdogModule(options = {}) {
         }
       }
     }
-    if (tasks.length > sentCount && logger && typeof logger.info === "function") {
+    if (tasks.length > sentCount + skippedCount && logger && typeof logger.info === "function") {
       logger.info("Watchdog control card retries deferred by send queue", {
         dueControlCardRetryCount: tasks.length,
         sentCount,
+        skippedCount,
         maxSendsPerTick: config.sendQueue.maxSendsPerTick
       });
     }

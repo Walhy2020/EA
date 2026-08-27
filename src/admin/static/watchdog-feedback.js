@@ -2,9 +2,10 @@
 
 (() => {
   const query = new URLSearchParams(window.location.search);
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const state = {
-    taskId: query.get("taskId") || "",
-    token: query.get("token") || "",
+    taskId: fragment.get("taskId") || query.get("taskId") || "",
+    token: fragment.get("token") || query.get("token") || "",
     task: null,
     submitting: false
   };

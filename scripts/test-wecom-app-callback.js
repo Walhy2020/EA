@@ -161,12 +161,12 @@ async function main() {
   fs.writeFileSync(storeFile, `${JSON.stringify({ tasks, drafts: [] }, null, 2)}\n`, "utf8");
 
   let robotMessageCount = 0;
-  let appMessageCount = 0;
+  const callbackAppMessages = [];
   let cardUpdateCount = 0;
   const appNotifier = {
     getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
-    send: async () => {
-      appMessageCount += 1;
+    send: async (message) => {
+      callbackAppMessages.push(message);
       return { ok: true, msgid: "isolated" };
     },
     updateTemplateCard: async () => {
@@ -259,6 +259,17 @@ async function main() {
     assert.equal(duplicate.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_active").responses.length, 1);
 
+    const completed = await sendEvent({ taskId: "ea_watch_wd_active_30", eventKey: "ea_watch_done" });
+    assert.equal(completed.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_active").status, "completed");
+    assert.ok(callbackAppMessages.some((message) => (
+      message.purpose === "watchdog_result_notice"
+      && message.messageType === "template_card"
+      && message.templateCard.main_title.title === "盯梢已完成"
+      && message.templateCard.sub_title_text === "这条任务已停止盯梢。"
+      && !message.templateCard.button_list
+    )));
+
     const terminal = await sendEvent({ taskId: "ea_watch_wd_completed_4", eventKey: "ea_watch_progress" });
     assert.equal(terminal.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_completed").responses.length, 0);
@@ -273,7 +284,7 @@ async function main() {
     assert.equal(rejected.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_initial").status, "rejected");
     assert.equal(robotMessageCount, 0);
-    assert.ok(appMessageCount >= 3);
+    assert.ok(callbackAppMessages.length >= 4);
     assert.ok(cardUpdateCount >= 7);
 
     const reminderStoreFile = path.join(directory, "safe-reminder-tasks.json");
@@ -329,15 +340,21 @@ async function main() {
     assert.equal(linkedMessages.length, 1);
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
-    assert.deepEqual(linkedCard.card_action, { type: 0 });
-    assert.equal(linkedCard.horizontal_content_list.some((item) => item.url || item.type === 1), false);
-    assert.equal(linkedCard.button_selection.question_key, "ea_watch_situation");
-    assert.equal(linkedCard.button_selection.title, "当前情况");
-    assert.equal(linkedCard.button_selection.selected_id, "none");
-    assert.equal(linkedCard.button_selection.option_list.length, 10);
-    assert.ok(linkedCard.button_selection.option_list.some((item) => item.id === "waiting_integration" && item.text === "等待联调"));
-    assert.ok(linkedCard.button_selection.option_list.every((item) => item.text.length <= 10));
-    assert.equal(JSON.stringify(linkedCard).includes("watchdog-feedback"), false);
+    assert.equal(linkedCard.button_selection, undefined);
+    assert.equal(linkedCard.card_action.type, 1);
+    const feedbackCardUrl = new URL(linkedCard.card_action.url);
+    assert.equal(feedbackCardUrl.pathname, "/watchdog-feedback.html");
+    assert.equal(feedbackCardUrl.searchParams.has("taskId"), false);
+    assert.equal(feedbackCardUrl.searchParams.has("token"), false);
+    const feedbackFragment = new URLSearchParams(feedbackCardUrl.hash.replace(/^#/, ""));
+    assert.equal(feedbackFragment.get("taskId"), "wd_linked_reminder");
+    assert.equal(feedbackFragment.get("token"), "legacy-feedback-token");
+    assert.ok(linkedCard.horizontal_content_list.some((item) => (
+      item.keyname === "当前情况说明" && item.value === "点击卡片填写"
+    )));
+    const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
+    assert.match(feedbackPageScript, /window\.location\.hash/);
+    assert.match(feedbackPageScript, /fragment\.get\("taskId"\) \|\| query\.get\("taskId"\)/);
 
     const feedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       taskId: "wd_linked_reminder",
@@ -369,6 +386,35 @@ async function main() {
       message.purpose === "watchdog_result_notice"
       && /说明：联调完成，正在观察运行情况/.test(message.text)
     )));
+
+    const expiredControlStoreFile = path.join(directory, "expired-control-tasks.json");
+    fs.writeFileSync(expiredControlStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_expired_control", {
+        mode: "once",
+        dueAt: "2026-08-14T04:00:00.000Z",
+        nextRunAt: "",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        oneTimeReminderSentAt: "2026-08-14T04:00:00.000Z",
+        controlCardRetryAt: "2026-08-14T04:01:00.000Z"
+      })],
+      drafts: []
+    }, null, 2)}\n`, "utf8");
+    let expiredControlCardSendCount = 0;
+    const expiredControlWatchdog = createWatchdogModule({
+      storeFile: expiredControlStoreFile,
+      moduleConfig: { enabled: true, appPush: { enabled: false }, sendQueue: { minIntervalMs: 1 } },
+      logger: { info() {}, warn() {} }
+    });
+    expiredControlWatchdog.setRobotServer({
+      sendTemplateCardMessage: async () => {
+        expiredControlCardSendCount += 1;
+        return { errcode: 0 };
+      }
+    });
+    await expiredControlWatchdog.tick();
+    assert.equal(expiredControlCardSendCount, 0);
+    assert.equal(expiredControlWatchdog.getStatus().queuedControlCardCount, 0);
+    expiredControlWatchdog.stop();
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

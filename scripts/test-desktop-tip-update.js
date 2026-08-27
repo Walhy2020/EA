@@ -520,7 +520,7 @@ function runReleaseArtifactTests() {
   const root = path.join(__dirname, "..", "tools", "desktop-tip");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "releases", "latest.json"), "utf8"));
   assert.equal(manifest.version, "0.5.1");
-  assert.equal(manifest.appVersion, "0.6.74");
+  assert.equal(manifest.appVersion, "0.6.75");
   const updatePath = path.join(root, "releases", manifest.packageFile);
   assert.equal(fs.statSync(updatePath).size, manifest.size);
   assert.equal(sha256(updatePath), manifest.sha256);
