@@ -162,6 +162,7 @@ async function main() {
   const storeFile = path.join(directory, "watchdog-tasks.json");
   const tasks = [
     fixture("wd_active"),
+    fixture("wd_receipt"),
     fixture("wd_completed", { status: "completed", nextRunAt: "" }),
     fixture("wd_once", { mode: "once", dueAt: "2026-08-14T07:00:00.000Z" }),
     fixture("wd_initial")
@@ -171,14 +172,16 @@ async function main() {
   let robotMessageCount = 0;
   const callbackAppMessages = [];
   let cardUpdateCount = 0;
+  const cardUpdates = [];
   const appNotifier = {
     getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
     send: async (message) => {
       callbackAppMessages.push(message);
       return { ok: true, msgid: "isolated" };
     },
-    updateTemplateCard: async () => {
+    updateTemplateCard: async (options) => {
       cardUpdateCount += 1;
+      cardUpdates.push(options);
       return { ok: true };
     }
   };
@@ -186,8 +189,15 @@ async function main() {
     storeFile,
     moduleConfig: {
       enabled: true,
-      appPush: { enabled: true, nativeCard: { enabled: true } }
+      appPush: {
+        enabled: true,
+        corpIdEnv: "TEST_FEEDBACK_CORP_ID",
+        agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
+        secretEnv: "TEST_FEEDBACK_SECRET",
+        nativeCard: { enabled: true }
+      }
     },
+    appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
     appNotifier,
     logger: { info() {}, warn() {} }
   });
@@ -252,6 +262,47 @@ async function main() {
     assert.equal(unknown.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_active").responses.length, 0);
 
+    const deniedReceipt = await sendEvent({
+      taskId: "ea_watch_wd_receipt_20",
+      eventKey: "ea_watch_card_received",
+      userId: "other-user"
+    });
+    assert.equal(deniedReceipt.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_receipt").appCardReceiptEvents, undefined);
+
+    const received = await sendEvent({ taskId: "ea_watch_wd_receipt_21", eventKey: "ea_watch_card_received" });
+    assert.equal(received.statusCode, 200);
+    const receivedTask = taskById(storeFile, "wd_receipt");
+    assert.equal(receivedTask.responses.length, 0);
+    assert.equal(receivedTask.initialAckEvents.length, 0);
+    assert.equal(receivedTask.appCardReceiptEvents.length, 1);
+    assert.equal(receivedTask.appCardReceiptEvents[0].cardTaskId, "ea_watch_wd_receipt_21");
+    assert.equal(receivedTask.appCardReceiptEvents[0].eventKey, "ea_watch_card_received");
+    const receivedUpdate = cardUpdates.at(-1).templateCard;
+    assert.equal(receivedUpdate.card_type, "text_notice");
+    assert.equal(receivedUpdate.source.desc, "EA盯梢 · 已收到");
+    assert.equal(receivedUpdate.source.desc_color, 3);
+    assert.equal(receivedUpdate.card_action.type, 0);
+    assert.equal(receivedUpdate.button_list, undefined);
+    assert.equal(receivedUpdate.task_id, "ea_watch_wd_receipt_21");
+    assert.equal(receivedUpdate.jump_list.length, 1);
+    assert.equal(receivedUpdate.jump_list[0].title, "详情");
+    assert.equal(receivedUpdate.jump_list[0].type, 1);
+    assert.match(receivedUpdate.jump_list[0].url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
+
+    const duplicateReceipt = await sendEvent({ taskId: "ea_watch_wd_receipt_21", eventKey: "ea_watch_card_received" });
+    assert.equal(duplicateReceipt.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_receipt").appCardReceiptEvents.length, 1);
+
+    const initialReceipt = await sendEvent({
+      taskId: "ea_watch_initial_wd_initial_22",
+      eventKey: "ea_watch_card_received"
+    });
+    assert.equal(initialReceipt.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_initial").status, "active");
+    assert.equal(taskById(storeFile, "wd_initial").initialAckEvents.length, 0);
+    assert.equal(taskById(storeFile, "wd_initial").appCardReceiptEvents.length, 1);
+
     const progress = await sendEvent({
       taskId: "ea_watch_wd_active_3",
       eventKey: "ea_watch_progress",
@@ -293,7 +344,7 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_initial").status, "rejected");
     assert.equal(robotMessageCount, 0);
     assert.ok(callbackAppMessages.length >= 4);
-    assert.ok(cardUpdateCount >= 7);
+    assert.ok(cardUpdateCount >= 11);
 
     const reminderStoreFile = path.join(directory, "safe-reminder-tasks.json");
     fs.writeFileSync(reminderStoreFile, `${JSON.stringify({
@@ -388,8 +439,17 @@ async function main() {
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
-    assert.equal(linkedCard.card_action.type, 1);
-    const feedbackAuthorizeUrl = new URL(linkedCard.card_action.url);
+    assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
+    assert.equal(linkedCard.source.desc_color, 2);
+    assert.equal(linkedCard.card_action.type, 0);
+    assert.equal(linkedCard.card_action.url, undefined);
+    assert.deepEqual(linkedCard.button_list, [
+      { text: "收到", key: "ea_watch_card_received", style: 1 }
+    ]);
+    assert.equal(linkedCard.jump_list.length, 1);
+    assert.equal(linkedCard.jump_list[0].title, "详情");
+    assert.equal(linkedCard.jump_list[0].type, 1);
+    const feedbackAuthorizeUrl = new URL(linkedCard.jump_list[0].url);
     assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
     assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");
     assert.equal(feedbackAuthorizeUrl.searchParams.get("appid"), corpId);
@@ -409,11 +469,9 @@ async function main() {
     assert.equal(feedbackCardUrl.searchParams.has("token"), false);
     assert.equal(feedbackCardUrl.searchParams.get("ref"), appFeedbackRefForTaskId("wd_linked_reminder"));
     assert.equal(feedbackCardUrl.hash, "");
-    assert.equal(linkedCard.card_action.url.includes("wd_linked_reminder"), false);
-    assert.equal(linkedCard.card_action.url.includes("legacy-feedback-token"), false);
-    assert.ok(linkedCard.horizontal_content_list.some((item) => (
-      item.keyname === "当前情况说明" && item.value === "点击卡片填写"
-    )));
+    assert.equal(linkedCard.jump_list[0].url.includes("wd_linked_reminder"), false);
+    assert.equal(linkedCard.jump_list[0].url.includes("legacy-feedback-token"), false);
+    assert.equal(linkedCard.horizontal_content_list.some((item) => item.keyname === "当前情况说明"), false);
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
     assert.match(feedbackPageScript, /window\.location\.hash/);

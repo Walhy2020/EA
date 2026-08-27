@@ -31,6 +31,7 @@ const APP_FEEDBACK_OAUTH_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
 const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
+const MAX_APP_CARD_RECEIPT_EVENTS_PER_TASK = 200;
 const APP_SITUATION_QUESTION_KEY = "ea_watch_situation";
 const APP_SITUATION_OPTIONS = Object.freeze([
   { id: "none", text: "无补充", note: "" },
@@ -2678,9 +2679,11 @@ function createWatchdogModule(options = {}) {
     return `${prefix}${task.id}_${Date.now()}`;
   }
 
-  function appNativeReminderCard(task, tipType) {
+  function appNativeReminderCard(task, tipType, options = {}) {
     const isInitial = tipType === "watchdog_initial";
-    const feedbackUrl = isInitial ? "" : appFeedbackUrlForTask(task);
+    const feedbackUrl = appFeedbackUrlForTask(task);
+    const received = Boolean(options.received);
+    const cardTaskId = normalizeText(options.cardTaskId) || appNativeCardTaskId(task, tipType);
     const contents = [
       watchdogTaskIdCardItem(task),
       { keyname: "发起人", value: requesterDisplayName(task) },
@@ -2688,30 +2691,118 @@ function createWatchdogModule(options = {}) {
     ];
     const remark = remarkCardItem(task);
     if (remark) contents.push(remark);
-    if (feedbackUrl) {
-      contents.push({ keyname: "当前情况说明", value: "点击卡片填写" });
-    }
-    return {
-      card_type: "button_interaction",
-      source: { desc: "EA盯梢", desc_color: 0 },
+    const card = {
+      card_type: received ? "text_notice" : "button_interaction",
+      source: {
+        desc: received ? "EA盯梢 · 已收到" : "NEW · EA盯梢",
+        desc_color: received ? 3 : 2
+      },
       main_title: {
         title: appPushHeadline(tipType),
         desc: truncate(task.content, 60)
       },
-      card_action: feedbackUrl ? { type: 1, url: feedbackUrl } : { type: 0 },
+      card_action: { type: 0 },
       horizontal_content_list: contents.filter(Boolean),
-      button_list: isInitial
-        ? [
-            { text: "正在处理", key: "ea_watch_initial_received", style: 1 },
-            { text: "拒绝盯梢", key: "ea_watch_initial_reject", style: 2 }
-          ]
-        : [
-            { text: "已完成", key: "ea_watch_done", style: 1 },
-            { text: "正常推进", key: "ea_watch_progress", style: 1 },
-            { text: "遇到困难", key: "ea_watch_blocked", style: 2 },
-            { text: "需要延期", key: "ea_watch_delay", style: 3 }
-          ],
-      task_id: appNativeCardTaskId(task, tipType)
+      task_id: cardTaskId
+    };
+    if (feedbackUrl) {
+      card.jump_list = [{ title: "详情", type: 1, url: feedbackUrl }];
+    }
+    if (!received) {
+      card.button_list = [{ text: "收到", key: "ea_watch_card_received", style: 1 }];
+    }
+    return card;
+  }
+
+  function appReminderTaskIdFromCardTaskId(cardTaskId) {
+    if (isWatchdogInitialTaskId(cardTaskId)) {
+      return parseWatchdogInitialCardTaskId(cardTaskId);
+    }
+    if (isWatchdogDraftTaskId(cardTaskId)
+      || isWatchdogControlTaskId(cardTaskId)
+      || isWatchdogRescheduleTaskId(cardTaskId)) {
+      return "";
+    }
+    return parseWatchdogCardTaskId(cardTaskId);
+  }
+
+  function appReminderTipTypeFromCard(task, cardTaskId) {
+    if (isWatchdogInitialTaskId(cardTaskId)) {
+      return "watchdog_initial";
+    }
+    return isOneTimeTask(task) ? "watchdog_once" : "watchdog_progress";
+  }
+
+  function handleAppReminderCardReceived(summary, sender) {
+    const id = appReminderTaskIdFromCardTaskId(summary.taskId);
+    const task = id ? findTask(id) : null;
+    if (!task) {
+      return {
+        handled: true,
+        updateCard: initialAckCardUpdate("盯梢任务不存在", "这张卡片对应的任务可能已被清理。", 2)
+      };
+    }
+    if (!senderCanFeedbackTask(task, sender)) {
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app reminder receipt rejected for non-recipient", {
+          taskId: task.id,
+          cardTaskId: summary.taskId,
+          senderConfigured: Boolean(sender && sender.userId),
+          assigneeConfigured: Boolean(task.assigneeUserId)
+        });
+      }
+      return {
+        handled: true,
+        task,
+        updateCard: initialAckCardUpdate("无查看权限", "只有这张盯梢卡片的接收人可以确认收到。", 2)
+      };
+    }
+
+    const senderUserId = normalizeText(sender && sender.userId);
+    task.appCardReceiptEvents = Array.isArray(task.appCardReceiptEvents) ? task.appCardReceiptEvents : [];
+    const duplicate = task.appCardReceiptEvents.some((item) => (
+      item
+      && item.cardTaskId === summary.taskId
+      && item.senderUserId === senderUserId
+    ));
+    if (!duplicate) {
+      const receivedAt = new Date().toISOString();
+      task.appCardReceiptEvents.push({
+        receivedAt,
+        eventKey: "ea_watch_card_received",
+        senderUserId,
+        cardTaskId: summary.taskId,
+        source: sender && sender.source ? sender.source : "wecom-app-native"
+      });
+      if (task.appCardReceiptEvents.length > MAX_APP_CARD_RECEIPT_EVENTS_PER_TASK) {
+        task.appCardReceiptEvents = task.appCardReceiptEvents.slice(-MAX_APP_CARD_RECEIPT_EVENTS_PER_TASK);
+      }
+      task.appCardLastReceivedAt = receivedAt;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog app reminder card marked received", {
+          taskId: task.id,
+          cardTaskId: summary.taskId,
+          senderConfigured: Boolean(senderUserId),
+          receiptCount: task.appCardReceiptEvents.length
+        });
+      }
+    } else if (logger && typeof logger.info === "function") {
+      logger.info("Watchdog duplicate app reminder receipt ignored", {
+        taskId: task.id,
+        cardTaskId: summary.taskId,
+        senderConfigured: Boolean(senderUserId)
+      });
+    }
+
+    return {
+      handled: true,
+      task,
+      updateCard: appNativeReminderCard(
+        task,
+        appReminderTipTypeFromCard(task, summary.taskId),
+        { received: true, cardTaskId: summary.taskId }
+      )
     };
   }
 
@@ -5387,6 +5478,10 @@ function createWatchdogModule(options = {}) {
         handled: true,
         updateCard: draftCardUpdate("盯梢操作未识别", "请重新发起盯梢。", 2)
       };
+    }
+
+    if (summary.eventKey === "ea_watch_card_received") {
+      return handleAppReminderCardReceived(summary, sender);
     }
 
     if (isWatchdogInitialTaskId(summary.taskId)) {
