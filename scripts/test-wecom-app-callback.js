@@ -11,10 +11,12 @@ const {
   createWatchdogModule
 } = require("../src/modules/watchdog/watchdogModule");
 const { createWecomAppCallback } = require("../src/notification/wecomAppCallback");
+const { verifyDemandH5State } = require("../src/admin/demandH5AuthState");
 
 const callbackToken = "callback-test-token";
 const callbackAesKey = Buffer.alloc(32, 7).toString("base64").replace(/=$/, "");
 const corpId = "test-corp-id";
+const feedbackSecret = "test-feedback-oauth-secret";
 const wecomPkcs7BlockSize = 32;
 
 function signature(encrypted, timestamp = "1700000000", nonce = "test-nonce") {
@@ -152,6 +154,9 @@ async function main() {
   process.env.TEST_APP_CALLBACK_TOKEN = callbackToken;
   process.env.TEST_APP_CALLBACK_AES_KEY = callbackAesKey;
   process.env.TEST_APP_CORP_ID = corpId;
+  process.env.TEST_FEEDBACK_CORP_ID = corpId;
+  process.env.TEST_FEEDBACK_AGENT_ID = "1000011";
+  process.env.TEST_FEEDBACK_SECRET = feedbackSecret;
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ea-wecom-app-callback-"));
   const storeFile = path.join(directory, "watchdog-tasks.json");
@@ -267,12 +272,10 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_active").status, "completed");
     assert.ok(callbackAppMessages.some((message) => (
       message.purpose === "watchdog_result_notice"
-      && message.messageType === "template_card"
-      && message.templateCard.main_title.title === "盯梢已完成"
-      && message.templateCard.sub_title_text === "这条任务已停止盯梢。"
-      && message.templateCard.card_action.type === 1
-      && message.templateCard.card_action.url === "https://work.weixin.qq.com"
-      && !message.templateCard.button_list
+      && message.messageType === undefined
+      && message.templateCard === undefined
+      && message.text.includes("【EA盯梢已完成】")
+      && message.text.includes("状态：已完成，盯梢已停止")
     )));
 
     const terminal = await sendEvent({ taskId: "ea_watch_wd_completed_4", eventKey: "ea_watch_progress" });
@@ -338,7 +341,16 @@ async function main() {
     const linkedMessages = [];
     const linkedReminderWatchdog = createWatchdogModule({
       storeFile: linkedReminderStoreFile,
-      moduleConfig: { enabled: true, appPush: { enabled: true, nativeCard: { enabled: true } } },
+      moduleConfig: {
+        enabled: true,
+        appPush: {
+          enabled: true,
+          corpIdEnv: "TEST_FEEDBACK_CORP_ID",
+          agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
+          secretEnv: "TEST_FEEDBACK_SECRET",
+          nativeCard: { enabled: true }
+        }
+      },
       appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
       appNotifier: {
         getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
@@ -355,7 +367,21 @@ async function main() {
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
     assert.equal(linkedCard.card_action.type, 1);
-    const feedbackCardUrl = new URL(linkedCard.card_action.url);
+    const feedbackAuthorizeUrl = new URL(linkedCard.card_action.url);
+    assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
+    assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");
+    assert.equal(feedbackAuthorizeUrl.searchParams.get("appid"), corpId);
+    assert.equal(feedbackAuthorizeUrl.searchParams.get("agentid"), "1000011");
+    assert.equal(feedbackAuthorizeUrl.searchParams.get("scope"), "snsapi_base");
+    assert.equal(feedbackAuthorizeUrl.hash, "#wechat_redirect");
+    const feedbackCallbackUrl = new URL(feedbackAuthorizeUrl.searchParams.get("redirect_uri"));
+    assert.equal(feedbackCallbackUrl.toString(), "https://ea.example.com/demand-h5-auth");
+    const feedbackReturnPath = verifyDemandH5State(
+      feedbackAuthorizeUrl.searchParams.get("state"),
+      feedbackSecret,
+      { audience: "wecom_h5", normalizeReturnPath: (value) => String(value || "") }
+    );
+    const feedbackCardUrl = new URL(feedbackReturnPath, "https://ea.example.com");
     assert.equal(feedbackCardUrl.pathname, "/watchdog-feedback.html");
     assert.equal(feedbackCardUrl.searchParams.has("taskId"), false);
     assert.equal(feedbackCardUrl.searchParams.has("token"), false);

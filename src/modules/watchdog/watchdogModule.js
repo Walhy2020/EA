@@ -10,6 +10,7 @@ const {
   resolveWeComUserIdByName
 } = require("../../wecom/wecomUserResolver");
 const { errorInfo } = require("../../utils/errorInfo");
+const { signDemandH5State } = require("../../admin/demandH5AuthState");
 
 const storeDir = path.join(projectRoot, "data", "watchdog");
 const storeFile = path.join(storeDir, "watchdog-tasks.json");
@@ -26,6 +27,7 @@ const DEFAULT_SEND_QUEUE_MAX_SENDS_PER_TICK = 1;
 const DEFAULT_SEND_QUEUE_BATCH_SUMMARY_COOLDOWN_MS = 30 * 60 * 1000;
 const APP_FEEDBACK_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const APP_FEEDBACK_NOTE_MAX_LENGTH = 500;
+const APP_FEEDBACK_OAUTH_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
 const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
@@ -1672,6 +1674,12 @@ function createWatchdogModule(options = {}) {
       enabled: Boolean(options.moduleConfig && options.moduleConfig.appPush && options.moduleConfig.appPush.enabled),
       deliveryMode: "app_only",
       feedbackUrl: normalizeText(options.appFeedbackUrl),
+      corpIdEnv: normalizeText(options.moduleConfig && options.moduleConfig.appPush && options.moduleConfig.appPush.corpIdEnv)
+        || "WECOM_DOC_CORP_ID",
+      agentIdEnv: normalizeText(options.moduleConfig && options.moduleConfig.appPush && options.moduleConfig.appPush.agentIdEnv)
+        || "WECOM_DOC_AGENT_ID",
+      secretEnv: normalizeText(options.moduleConfig && options.moduleConfig.appPush && options.moduleConfig.appPush.secretEnv)
+        || "WECOM_DOC_SECRET",
       failureBackoffMs: boundedNumber(
         options.moduleConfig && options.moduleConfig.appPush && options.moduleConfig.appPush.failureBackoffMs,
         5 * 60 * 1000,
@@ -2591,7 +2599,36 @@ function createWatchdogModule(options = {}) {
       url.searchParams.delete("ref");
       url.searchParams.set("ref", appFeedbackRefForTaskId(task.id));
       url.hash = "";
-      return url.toString();
+      const corpId = normalizeText(process.env[config.appPush.corpIdEnv]);
+      const agentId = normalizeText(process.env[config.appPush.agentIdEnv]);
+      const secret = normalizeText(process.env[config.appPush.secretEnv]);
+      if (!corpId || !agentId || !secret) {
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("Watchdog app feedback OAuth unavailable; using direct feedback URL", {
+            taskId: task.id,
+            hasCorpId: Boolean(corpId),
+            hasAgentId: Boolean(agentId),
+            hasSecret: Boolean(secret),
+            feedbackHost: url.host
+          });
+        }
+        return url.toString();
+      }
+
+      const returnPath = `${url.pathname}${url.search}`;
+      const callbackUrl = new URL("/demand-h5-auth", url.origin).toString();
+      const authorizeUrl = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
+      authorizeUrl.searchParams.set("appid", corpId);
+      authorizeUrl.searchParams.set("redirect_uri", callbackUrl);
+      authorizeUrl.searchParams.set("response_type", "code");
+      authorizeUrl.searchParams.set("scope", "snsapi_base");
+      authorizeUrl.searchParams.set("state", signDemandH5State(returnPath, secret, {
+        audience: "wecom_h5",
+        ttlMs: APP_FEEDBACK_OAUTH_STATE_TTL_MS
+      }));
+      authorizeUrl.searchParams.set("agentid", agentId);
+      authorizeUrl.hash = "wechat_redirect";
+      return authorizeUrl.toString();
     } catch (error) {
       if (logger && typeof logger.warn === "function") {
         logger.warn("Watchdog app feedback URL is invalid", {
@@ -2836,32 +2873,6 @@ function createWatchdogModule(options = {}) {
     ].filter(Boolean).join("\n");
   }
 
-  function appCompletedResultCard(task, label, note = "") {
-    const assignee = task.assigneeName || task.assigneeUserId || "未知";
-    const contents = [
-      watchdogTaskIdCardItem(task),
-      { keyname: "被盯梢人", value: assignee },
-      { keyname: "反馈结果", value: label || "已完成" }
-    ];
-    if (note) {
-      contents.push({ keyname: "当前情况", value: truncate(note, 80) });
-    }
-    return {
-      card_type: "text_notice",
-      source: { desc: "EA盯梢", desc_color: 3 },
-      main_title: {
-        title: "盯梢已完成",
-        desc: truncate(task.content || "", 60)
-      },
-      horizontal_content_list: contents.filter(Boolean),
-      sub_title_text: "这条任务已停止盯梢。",
-      card_action: {
-        type: 1,
-        url: "https://work.weixin.qq.com"
-      }
-    };
-  }
-
   function latestAppResultResponse(task) {
     const responses = Array.isArray(task.responses) ? task.responses : [];
     return responses.slice().reverse().find((item) => (
@@ -2898,15 +2909,9 @@ function createWatchdogModule(options = {}) {
     const note = normalizeText(options.note);
     const responseAt = options.responseAt || new Date().toISOString();
     try {
-      const completed = task.status === "completed";
       const result = await appNotifier.send({
         targetUserId: requesterUserId,
-        ...(completed
-          ? {
-            messageType: "template_card",
-            templateCard: appCompletedResultCard(task, label, note)
-          }
-          : { text: appResultNoticeText(task, label, note) }),
+        text: appResultNoticeText(task, label, note),
         purpose: "watchdog_result_notice"
       });
       if (!result || !result.ok) {
@@ -2928,7 +2933,7 @@ function createWatchdogModule(options = {}) {
           taskId: task.id,
           requesterUserId,
           label,
-          messageType: completed ? "template_card" : "text",
+          messageType: "text",
           responseAt,
           msgid: result.msgid || ""
         });
