@@ -282,6 +282,8 @@ async function main() {
     assert.equal(receivedUpdate.card_type, "text_notice");
     assert.equal(receivedUpdate.source.desc, "EA盯梢 · 已收到");
     assert.equal(receivedUpdate.source.desc_color, 3);
+    assert.equal(receivedUpdate.main_title.title, "隔离回调测试任务-wd_receipt");
+    assert.equal(receivedUpdate.main_title.desc, "");
     assert.equal(receivedUpdate.card_action.type, 1);
     assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.equal(receivedUpdate.button_list, undefined);
@@ -441,8 +443,10 @@ async function main() {
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
-    assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
-    assert.equal(linkedCard.source.desc_color, 2);
+    assert.equal(linkedCard.source.desc, "EA盯梢");
+    assert.equal(linkedCard.source.desc_color, 1);
+    assert.equal(linkedCard.main_title.title, "NEW · 隔离回调测试任务-wd_linked_reminder");
+    assert.equal(linkedCard.main_title.desc, "");
     assert.equal(linkedCard.card_action.type, 1);
     assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.deepEqual(linkedCard.button_list, [
@@ -453,6 +457,10 @@ async function main() {
     assert.equal(linkedDetail.value, "查看反馈记录");
     assert.equal(linkedDetail.type, 1);
     assert.equal(linkedDetail.url, linkedCard.card_action.url);
+    assert.deepEqual(
+      linkedCard.horizontal_content_list.map((item) => item.keyname),
+      ["发起人", "盯梢时间", "任务ID", "详情"]
+    );
     const feedbackAuthorizeUrl = new URL(linkedDetail.url);
     assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
     assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");

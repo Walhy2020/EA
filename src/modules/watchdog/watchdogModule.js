@@ -2680,26 +2680,23 @@ function createWatchdogModule(options = {}) {
   }
 
   function appNativeReminderCard(task, tipType, options = {}) {
-    const isInitial = tipType === "watchdog_initial";
     const feedbackUrl = appFeedbackUrlForTask(task);
     const received = Boolean(options.received);
     const cardTaskId = normalizeText(options.cardTaskId) || appNativeCardTaskId(task, tipType);
     const contents = [
-      watchdogTaskIdCardItem(task),
       { keyname: "发起人", value: requesterDisplayName(task) },
-      { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) }
+      { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) },
+      watchdogTaskIdCardItem(task)
     ];
-    const remark = remarkCardItem(task);
-    if (remark) contents.push(remark);
     const card = {
       card_type: received ? "text_notice" : "button_interaction",
       source: {
-        desc: received ? "EA盯梢 · 已收到" : "NEW · EA盯梢",
-        desc_color: received ? 3 : 2
+        desc: received ? "EA盯梢 · 已收到" : "EA盯梢",
+        desc_color: received ? 3 : 1
       },
       main_title: {
-        title: appPushHeadline(tipType),
-        desc: truncate(task.content, 60)
+        title: truncate(received ? task.content : `NEW · ${task.content}`, 60),
+        desc: ""
       },
       card_action: feedbackUrl
         ? { type: 1, url: feedbackUrl }
