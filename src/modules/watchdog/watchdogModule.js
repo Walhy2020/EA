@@ -3057,10 +3057,48 @@ function createWatchdogModule(options = {}) {
     return labels[task && task.status] || "已结束";
   }
 
-  function appFeedbackTaskView(task) {
-    const responses = Array.isArray(task.responses) ? task.responses : [];
+  function appFeedbackHistory(task) {
     const initialAckEvents = Array.isArray(task.initialAckEvents) ? task.initialAckEvents : [];
-    const lastResponse = responses[responses.length - 1] || initialAckEvents[initialAckEvents.length - 1] || null;
+    const responses = Array.isArray(task.responses) ? task.responses : [];
+    const recordsByKey = new Map();
+    [...initialAckEvents, ...responses].forEach((item, sequence) => {
+      if (!item || typeof item !== "object") return;
+      const receivedAt = normalizeText(item.receivedAt);
+      const eventKey = normalizeText(item.eventKey);
+      const senderUserId = normalizeText(item.senderUserId);
+      const explicitLabel = normalizeText(item.label);
+      const fallbackLabel = eventKey.startsWith("ea_watch_initial_")
+        ? initialActionLabel(eventKey)
+        : statusLabel(eventKey);
+      const label = explicitLabel || (fallbackLabel !== eventKey ? fallbackLabel : "反馈");
+      const record = {
+        label,
+        receivedAt,
+        note: normalizeText(item.note),
+        sequence
+      };
+      const key = receivedAt
+        ? [receivedAt, eventKey, senderUserId].join("|")
+        : [eventKey, senderUserId, sequence].join("|");
+      const existing = recordsByKey.get(key);
+      if (!existing || (!existing.note && record.note) || (existing.label === "拒绝" && record.label === "拒绝盯梢")) {
+        recordsByKey.set(key, record);
+      }
+    });
+    return Array.from(recordsByKey.values())
+      .sort((left, right) => {
+        const timeDifference = dateValueMs(right.receivedAt) - dateValueMs(left.receivedAt);
+        return timeDifference || right.sequence - left.sequence;
+      })
+      .map(({ sequence, ...record }) => record);
+  }
+
+  function appFeedbackTaskView(task) {
+    const feedbackHistory = appFeedbackHistory(task);
+    const latestFeedback = feedbackHistory[0] || null;
+    if (latestFeedback && !latestFeedback.note && task.lastFeedbackNote) {
+      latestFeedback.note = task.lastFeedbackNote;
+    }
     return {
       id: task.id,
       status: task.status || "",
@@ -3077,11 +3115,12 @@ function createWatchdogModule(options = {}) {
       nextRunAt: task.nextRunAt || "",
       nextRunText: task.nextRunAt ? formatLocalMinute(task.nextRunAt) : "",
       awaitingReschedule: Boolean(task.awaitingRescheduleFrom),
-      lastFeedback: lastResponse
+      feedbackHistory,
+      lastFeedback: latestFeedback
         ? {
-          label: lastResponse.label || "",
-          receivedAt: lastResponse.receivedAt || "",
-          note: lastResponse.note || task.lastFeedbackNote || ""
+          label: latestFeedback.label || "",
+          receivedAt: latestFeedback.receivedAt || "",
+          note: latestFeedback.note || ""
         }
         : null
     };

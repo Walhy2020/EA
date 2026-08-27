@@ -28,8 +28,9 @@
     remark: document.getElementById("remarkText"),
     attachmentBlock: document.getElementById("attachmentBlock"),
     attachment: document.getElementById("attachmentText"),
-    lastFeedbackBlock: document.getElementById("lastFeedbackBlock"),
-    lastFeedback: document.getElementById("lastFeedbackText"),
+    feedbackHistoryBlock: document.getElementById("feedbackHistoryBlock"),
+    feedbackHistoryCount: document.getElementById("feedbackHistoryCount"),
+    feedbackHistoryList: document.getElementById("feedbackHistoryList"),
     note: document.getElementById("feedbackNote"),
     message: document.getElementById("actionMessage"),
     buttons: Array.from(document.querySelectorAll("#actionGrid button"))
@@ -127,20 +128,39 @@
     return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
   }
 
-  function renderLastFeedback(lastFeedback) {
-    if (!lastFeedback || !lastFeedback.label) {
-      elements.lastFeedbackBlock.hidden = true;
+  function renderFeedbackHistory(feedbackHistory, lastFeedback) {
+    const records = Array.isArray(feedbackHistory) && feedbackHistory.length > 0
+      ? feedbackHistory
+      : (lastFeedback && lastFeedback.label ? [lastFeedback] : []);
+    elements.feedbackHistoryList.replaceChildren();
+    if (records.length === 0) {
+      elements.feedbackHistoryBlock.hidden = true;
       return;
     }
-    const lines = [lastFeedback.label];
-    if (lastFeedback.note) {
-      lines.push(`说明：${lastFeedback.note}`);
-    }
-    if (lastFeedback.receivedAt) {
-      lines.push(`时间：${formatShanghaiMinute(lastFeedback.receivedAt)}`);
-    }
-    elements.lastFeedback.textContent = lines.join("\n");
-    elements.lastFeedbackBlock.hidden = false;
+    records.forEach((record) => {
+      const item = document.createElement("li");
+      item.className = "feedback-history-item";
+      const heading = document.createElement("div");
+      heading.className = "feedback-history-heading";
+      const label = document.createElement("strong");
+      label.textContent = record.label || "反馈";
+      heading.appendChild(label);
+      if (record.receivedAt) {
+        const time = document.createElement("time");
+        time.dateTime = record.receivedAt;
+        time.textContent = formatShanghaiMinute(record.receivedAt);
+        heading.appendChild(time);
+      }
+      item.appendChild(heading);
+      if (record.note) {
+        const note = document.createElement("p");
+        note.textContent = record.note;
+        item.appendChild(note);
+      }
+      elements.feedbackHistoryList.appendChild(item);
+    });
+    elements.feedbackHistoryCount.textContent = `${records.length} 条 · 最新在前`;
+    elements.feedbackHistoryBlock.hidden = false;
   }
 
   function renderTask(task) {
@@ -158,7 +178,7 @@
     elements.remarkBlock.hidden = !task.remark;
     elements.attachment.textContent = task.attachment || "";
     elements.attachmentBlock.hidden = !task.attachment;
-    renderLastFeedback(task.lastFeedback);
+    renderFeedbackHistory(task.feedbackHistory, task.lastFeedback);
     setButtonsDisabled(state.submitting || !task.canFeedback);
     if (!task.canFeedback) {
       setMessage(`这条盯梢${task.statusText}。`);

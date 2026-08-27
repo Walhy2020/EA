@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f3f7f8">
   <title>需求进度管理 - 盯梢反馈</title>
-  <link rel="stylesheet" href="./watchdog-feedback.css?v=0.1.5">
+  <link rel="stylesheet" href="./watchdog-feedback.css?v=0.1.6">
 </head>
 <body>
   <main class="app-shell">
@@ -53,9 +53,12 @@
         <p class="section-label">附件</p>
         <p id="attachmentText"></p>
       </section>
-      <section id="lastFeedbackBlock" class="last-feedback" hidden>
-        <p class="section-label">最近反馈</p>
-        <p id="lastFeedbackText"></p>
+      <section id="feedbackHistoryBlock" class="feedback-history" hidden>
+        <div class="feedback-history-title">
+          <p class="section-label">历史反馈记录</p>
+          <span id="feedbackHistoryCount" class="feedback-history-count"></span>
+        </div>
+        <ol id="feedbackHistoryList" class="feedback-history-list"></ol>
       </section>
 
       <div id="actionGrid" class="action-grid" aria-label="任务反馈操作">
@@ -75,8 +78,8 @@
       <p id="actionMessage" class="action-message" aria-live="polite"></p>
     </section>
 
-    <footer>需求进度管理 · EA盯梢反馈 v0.1.5</footer>
+    <footer>需求进度管理 · EA盯梢反馈 v0.1.6</footer>
   </main>
-  <script src="./watchdog-feedback.js?v=0.1.5"></script>
+  <script src="./watchdog-feedback.js?v=0.1.6"></script>
 </body>
 </html>

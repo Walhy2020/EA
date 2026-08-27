@@ -331,7 +331,29 @@ async function main() {
         nextRunAt: "2099-08-14T05:00:00.000Z",
         firstReminderSentAt: "2026-08-14T04:00:00.000Z",
         initialAckStatus: "received",
-        initialAckAt: "2026-08-14T04:00:00.000Z"
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        initialAckEvents: [{
+          receivedAt: "2026-08-14T04:00:00.000Z",
+          eventKey: "ea_watch_initial_received",
+          label: "收到",
+          senderUserId: "assignee",
+          source: "wecom-app"
+        }],
+        responses: [{
+          receivedAt: "2026-08-14T04:30:00.000Z",
+          eventKey: "ea_watch_progress",
+          label: "正常推进",
+          senderUserId: "assignee",
+          source: "wecom-app",
+          note: "已完成第一阶段"
+        }, {
+          receivedAt: "2026-08-14T05:00:00.000Z",
+          eventKey: "ea_watch_delay",
+          label: "需要延期",
+          senderUserId: "assignee",
+          source: "wecom-app",
+          note: "等待测试环境"
+        }]
       }), fixture("wd_linked_completed", {
         status: "completed",
         nextRunAt: ""
@@ -393,10 +415,14 @@ async function main() {
       item.keyname === "当前情况说明" && item.value === "点击卡片填写"
     )));
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
+    const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
     assert.match(feedbackPageScript, /window\.location\.hash/);
     assert.match(feedbackPageScript, /query\.get\("ref"\)/);
     assert.match(feedbackPageScript, /\/api\/dev-progress\/h5-session/);
     assert.match(feedbackPageScript, /\/demand-h5-auth\?returnTo=/);
+    assert.match(feedbackPageScript, /renderFeedbackHistory/);
+    assert.match(feedbackPageHtml, /id="feedbackHistoryList"/);
+    assert.match(feedbackPageHtml, /历史反馈记录/);
 
     const signedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       ref: feedbackCardUrl.searchParams.get("ref"),
@@ -410,6 +436,14 @@ async function main() {
     });
     assert.equal(secondSignedFeedbackView.ok, true);
     assert.equal(secondSignedFeedbackView.task.id, "wd_linked_reminder_2");
+    assert.deepEqual(
+      secondSignedFeedbackView.task.feedbackHistory.map((item) => item.label),
+      ["需要延期", "正常推进", "收到"]
+    );
+    assert.equal(secondSignedFeedbackView.task.feedbackHistory[0].note, "等待测试环境");
+    assert.equal(secondSignedFeedbackView.task.feedbackHistory[1].note, "已完成第一阶段");
+    assert.equal(secondSignedFeedbackView.task.lastFeedback.label, "需要延期");
+    assert.equal(Object.hasOwn(secondSignedFeedbackView.task.feedbackHistory[0], "senderUserId"), false);
     const foreignFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       ref: feedbackCardUrl.searchParams.get("ref"),
       assigneeUserId: "other-user"
@@ -451,6 +485,8 @@ async function main() {
     assert.equal(linkedTask.responses.length, 1);
     assert.equal(linkedTask.responses[0].note, "联调完成，正在观察运行情况");
     assert.equal(linkedTask.lastFeedbackNote, "联调完成，正在观察运行情况");
+    assert.equal(feedback.task.feedbackHistory[0].label, "正常推进");
+    assert.equal(feedback.task.feedbackHistory[0].note, "联调完成，正在观察运行情况");
     assert.ok(linkedMessages.some((message) => (
       message.purpose === "watchdog_result_notice"
       && /说明：联调完成，正在观察运行情况/.test(message.text)
