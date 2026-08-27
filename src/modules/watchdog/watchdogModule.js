@@ -84,6 +84,17 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function appFeedbackRefForTaskId(value) {
+  const taskIdValue = normalizeText(value);
+  if (!taskIdValue) {
+    return "";
+  }
+  return crypto.createHash("sha256")
+    .update(`ea-watchdog-feedback-v1:${taskIdValue}`)
+    .digest("hex")
+    .slice(0, 12);
+}
+
 function truncate(value, maxLength) {
   const text = String(value || "").trim();
   if (text.length <= maxLength) {
@@ -2559,24 +2570,6 @@ function createWatchdogModule(options = {}) {
       && crypto.timingSafeEqual(expectedBuffer, actualBuffer);
   }
 
-  function ensureAppFeedbackToken(task) {
-    if (task.appFeedbackToken) {
-      return task.appFeedbackToken;
-    }
-    const now = new Date().toISOString();
-    task.appFeedbackToken = crypto.randomBytes(24).toString("hex");
-    task.appFeedbackTokenCreatedAt = now;
-    task.updatedAt = now;
-    save();
-    if (logger && typeof logger.info === "function") {
-      logger.info("Watchdog app feedback token created", {
-        taskId: task.id,
-        assigneeUserId: task.assigneeUserId || ""
-      });
-    }
-    return task.appFeedbackToken;
-  }
-
   function appFeedbackUrlForTask(task) {
     if (!config.appPush.feedbackUrl) {
       return "";
@@ -2595,10 +2588,9 @@ function createWatchdogModule(options = {}) {
       }
       url.searchParams.delete("taskId");
       url.searchParams.delete("token");
-      url.hash = new URLSearchParams({
-        taskId: task.id,
-        token: ensureAppFeedbackToken(task)
-      }).toString();
+      url.searchParams.delete("ref");
+      url.searchParams.set("ref", appFeedbackRefForTaskId(task.id));
+      url.hash = "";
       return url.toString();
     } catch (error) {
       if (logger && typeof logger.warn === "function") {
@@ -3087,28 +3079,74 @@ function createWatchdogModule(options = {}) {
     };
   }
 
+  function findTaskByAppFeedbackRef(value) {
+    const feedbackRef = normalizeText(value).toLowerCase();
+    if (!/^[a-f0-9]{12}$/.test(feedbackRef)) {
+      return null;
+    }
+    const matches = state.tasks.filter((task) => appFeedbackRefForTaskId(task && task.id) === feedbackRef);
+    if (matches.length !== 1) {
+      if (matches.length > 1 && logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app feedback ref collision detected", {
+          feedbackRef,
+          matchCount: matches.length
+        });
+      }
+      return null;
+    }
+    return matches[0];
+  }
+
   function appFeedbackAccessResult(input = {}) {
     if (!config.enabled) {
       return { ok: false, message: "盯梢系统尚未启用" };
     }
     const taskIdValue = normalizeText(input.taskId);
-    const task = findTask(taskIdValue);
+    const token = normalizeText(input.token);
+    const feedbackRef = normalizeText(input.ref).toLowerCase();
+    const legacyAccess = Boolean(taskIdValue || token);
+    const task = legacyAccess ? findTask(taskIdValue) : findTaskByAppFeedbackRef(feedbackRef);
     if (!task) {
       if (logger && typeof logger.warn === "function") {
-        logger.warn("Watchdog app feedback task not found", { taskId: taskIdValue });
+        logger.warn("Watchdog app feedback task not found", {
+          accessMode: legacyAccess ? "legacy_token" : "signed_identity",
+          taskId: legacyAccess ? taskIdValue : "",
+          feedbackRef: legacyAccess ? "" : feedbackRef
+        });
       }
-      return { ok: false, message: "未找到这条盯梢任务" };
+      return { ok: false, statusCode: 400, message: "未找到这条盯梢任务" };
     }
-    if (!appFeedbackTokenMatches(task, input.token)) {
+    if (legacyAccess && !appFeedbackTokenMatches(task, token)) {
       if (logger && typeof logger.warn === "function") {
         logger.warn("Watchdog app feedback access denied", {
+          accessMode: "legacy_token",
           taskId: task.id,
           assigneeUserId: task.assigneeUserId || ""
         });
       }
-      return { ok: false, message: "反馈链接已失效或无权访问" };
+      return { ok: false, statusCode: 400, message: "反馈链接已失效或无权访问" };
     }
-    return { ok: true, task };
+    if (!legacyAccess) {
+      const identityUserId = normalizeText(input.assigneeUserId);
+      if (!identityUserId || identityUserId !== normalizeText(task.assigneeUserId)) {
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("Watchdog app feedback signed identity denied", {
+            accessMode: "signed_identity",
+            taskId: task.id,
+            feedbackRef,
+            assigneeUserId: task.assigneeUserId || "",
+            identityUserId
+          });
+        }
+        return {
+          ok: false,
+          statusCode: 403,
+          code: "watchdog_feedback_forbidden",
+          message: "这条盯梢不属于当前登录用户，不能查看或反馈"
+        };
+      }
+    }
+    return { ok: true, task, accessMode: legacyAccess ? "legacy_token" : "signed_identity" };
   }
 
   function getAppFeedbackTask(input = {}) {
@@ -6061,6 +6099,7 @@ function createWatchdogModule(options = {}) {
 }
 
 module.exports = {
+  appFeedbackRefForTaskId,
   createWatchdogModule,
   intervalMinutesFromText,
   extractAssigneeName,

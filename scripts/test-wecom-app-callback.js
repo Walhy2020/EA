@@ -6,7 +6,10 @@ const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
-const { createWatchdogModule } = require("../src/modules/watchdog/watchdogModule");
+const {
+  appFeedbackRefForTaskId,
+  createWatchdogModule
+} = require("../src/modules/watchdog/watchdogModule");
 const { createWecomAppCallback } = require("../src/notification/wecomAppCallback");
 
 const callbackToken = "callback-test-token";
@@ -319,6 +322,14 @@ async function main() {
         initialAckStatus: "received",
         initialAckAt: "2026-08-14T04:00:00.000Z",
         appFeedbackToken: "legacy-feedback-token"
+      }), fixture("wd_linked_reminder_2", {
+        nextRunAt: "2099-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z"
+      }), fixture("wd_linked_completed", {
+        status: "completed",
+        nextRunAt: ""
       })],
       drafts: []
     }, null, 2)}\n`, "utf8");
@@ -346,21 +357,51 @@ async function main() {
     assert.equal(feedbackCardUrl.pathname, "/watchdog-feedback.html");
     assert.equal(feedbackCardUrl.searchParams.has("taskId"), false);
     assert.equal(feedbackCardUrl.searchParams.has("token"), false);
-    const feedbackFragment = new URLSearchParams(feedbackCardUrl.hash.replace(/^#/, ""));
-    assert.equal(feedbackFragment.get("taskId"), "wd_linked_reminder");
-    assert.equal(feedbackFragment.get("token"), "legacy-feedback-token");
+    assert.equal(feedbackCardUrl.searchParams.get("ref"), appFeedbackRefForTaskId("wd_linked_reminder"));
+    assert.equal(feedbackCardUrl.hash, "");
+    assert.equal(linkedCard.card_action.url.includes("wd_linked_reminder"), false);
+    assert.equal(linkedCard.card_action.url.includes("legacy-feedback-token"), false);
     assert.ok(linkedCard.horizontal_content_list.some((item) => (
       item.keyname === "当前情况说明" && item.value === "点击卡片填写"
     )));
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     assert.match(feedbackPageScript, /window\.location\.hash/);
-    assert.match(feedbackPageScript, /fragment\.get\("taskId"\) \|\| query\.get\("taskId"\)/);
+    assert.match(feedbackPageScript, /query\.get\("ref"\)/);
+    assert.match(feedbackPageScript, /\/api\/dev-progress\/h5-session/);
+    assert.match(feedbackPageScript, /\/demand-h5-auth\?returnTo=/);
+
+    const signedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
+      ref: feedbackCardUrl.searchParams.get("ref"),
+      assigneeUserId: "assignee"
+    });
+    assert.equal(signedFeedbackView.ok, true);
+    assert.equal(signedFeedbackView.task.id, "wd_linked_reminder");
+    const secondSignedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
+      ref: appFeedbackRefForTaskId("wd_linked_reminder_2"),
+      assigneeUserId: "assignee"
+    });
+    assert.equal(secondSignedFeedbackView.ok, true);
+    assert.equal(secondSignedFeedbackView.task.id, "wd_linked_reminder_2");
+    const foreignFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
+      ref: feedbackCardUrl.searchParams.get("ref"),
+      assigneeUserId: "other-user"
+    });
+    assert.equal(foreignFeedbackView.ok, false);
+    assert.equal(foreignFeedbackView.statusCode, 403);
 
     const feedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       taskId: "wd_linked_reminder",
       token: "legacy-feedback-token"
     });
     assert.equal(feedbackView.ok, true);
+    const completedFeedback = await linkedReminderWatchdog.submitAppFeedback({
+      ref: appFeedbackRefForTaskId("wd_linked_completed"),
+      assigneeUserId: "assignee",
+      action: "done",
+      note: ""
+    });
+    assert.equal(completedFeedback.ok, false);
+    assert.match(completedFeedback.message, /不能重复反馈/);
     const overlong = await linkedReminderWatchdog.submitAppFeedback({
       taskId: "wd_linked_reminder",
       token: "legacy-feedback-token",

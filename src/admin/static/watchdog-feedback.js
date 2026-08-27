@@ -3,9 +3,13 @@
 (() => {
   const query = new URLSearchParams(window.location.search);
   const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const legacyTaskId = fragment.get("taskId") || query.get("taskId") || "";
+  const legacyToken = fragment.get("token") || query.get("token") || "";
   const state = {
-    taskId: fragment.get("taskId") || query.get("taskId") || "",
-    token: fragment.get("token") || query.get("token") || "",
+    ref: String(query.get("ref") || "").trim().toLowerCase(),
+    taskId: legacyTaskId,
+    token: legacyToken,
+    legacyAccess: Boolean(legacyTaskId && legacyToken),
     task: null,
     submitting: false
   };
@@ -31,9 +35,43 @@
     buttons: Array.from(document.querySelectorAll("#actionGrid button"))
   };
 
+  function feedbackAccessPayload() {
+    return state.legacyAccess
+      ? { taskId: state.taskId, token: state.token }
+      : { ref: state.ref };
+  }
+
   function feedbackQuery() {
-    const params = new URLSearchParams({ taskId: state.taskId, token: state.token });
+    const params = new URLSearchParams(feedbackAccessPayload());
     return params.toString();
+  }
+
+  function feedbackReturnPath() {
+    return `/watchdog-feedback.html?ref=${encodeURIComponent(state.ref)}`;
+  }
+
+  function redirectForIdentity() {
+    const returnTo = feedbackReturnPath();
+    const isWeCom = /wxwork/i.test(String(window.navigator && window.navigator.userAgent || ""));
+    window.location.replace(isWeCom
+      ? `/demand-h5-auth?returnTo=${encodeURIComponent(returnTo)}`
+      : `/demand-login.html?returnTo=${encodeURIComponent(returnTo)}`);
+  }
+
+  async function ensureSignedIdentity() {
+    const response = await fetch("/api/dev-progress/h5-session", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (response.ok && result.identity && result.identity.userId) {
+      return true;
+    }
+    if (response.status === 401) {
+      if (query.get("entryError")) {
+        throw new Error("企业微信身份认证未完成，请重新打开盯梢卡片后再试。");
+      }
+      redirectForIdentity();
+      return false;
+    }
+    throw new Error(result.message || "企业微信登录服务暂不可用，请稍后重试。");
   }
 
   async function requestJson(url, options) {
@@ -42,6 +80,7 @@
     if (!response.ok || !result.ok) {
       const error = new Error(result.message || "请求失败");
       error.result = result;
+      error.status = response.status;
       throw error;
     }
     return result;
@@ -106,6 +145,7 @@
 
   function renderTask(task) {
     state.task = task;
+    state.taskId = task.id || state.taskId;
     elements.badge.textContent = task.statusText || "未知状态";
     elements.badge.className = `status-badge ${statusClass(task)}`.trim();
     elements.content.textContent = task.content || "未填写任务内容";
@@ -126,7 +166,9 @@
   }
 
   async function loadTask() {
-    if (!state.taskId || !state.token) {
+    const hasPartialLegacyAccess = Boolean(state.taskId || state.token) && !state.legacyAccess;
+    const validSignedAccess = /^[a-f0-9]{12}$/.test(state.ref);
+    if (hasPartialLegacyAccess || (!state.legacyAccess && !validSignedAccess)) {
       elements.loading.hidden = true;
       elements.error.textContent = "反馈链接不完整，请从企业微信盯梢消息中重新打开。";
       elements.error.hidden = false;
@@ -135,6 +177,10 @@
       return;
     }
     try {
+      if (!state.legacyAccess) {
+        const identityReady = await ensureSignedIdentity();
+        if (!identityReady) return;
+      }
       const result = await requestJson(`/api/watchdog/app-feedback?${feedbackQuery()}`);
       elements.loading.hidden = true;
       elements.error.hidden = true;
@@ -167,8 +213,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          taskId: state.taskId,
-          token: state.token,
+          ...feedbackAccessPayload(),
           action,
           note
         })

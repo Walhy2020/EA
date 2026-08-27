@@ -7,9 +7,16 @@ function safeReturnPath() {
   const raw = new URLSearchParams(window.location.search).get("returnTo") || "/demand-h5.html";
   try {
     const parsed = new URL(raw, window.location.origin);
-    return new Set(["/", "/index.html", "/demand-h5.html", "/demand", "/demand/"]).has(parsed.pathname)
-      ? `${parsed.pathname}${parsed.search}${parsed.hash}`
-      : "/demand-h5.html";
+    if (!new Set(["/", "/index.html", "/demand-h5.html", "/demand", "/demand/", "/watchdog-feedback.html"]).has(parsed.pathname)) {
+      return "/demand-h5.html";
+    }
+    if (parsed.pathname === "/watchdog-feedback.html") {
+      const feedbackRef = String(parsed.searchParams.get("ref") || "").trim().toLowerCase();
+      return /^[a-f0-9]{12}$/.test(feedbackRef)
+        ? `/watchdog-feedback.html?ref=${encodeURIComponent(feedbackRef)}`
+        : "/watchdog-feedback.html";
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch (error) {
     return "/demand-h5.html";
   }

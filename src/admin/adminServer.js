@@ -133,8 +133,17 @@ function serveStatic(req, res) {
 
 function demandH5ReturnPath(value) {
   const target = new URL(String(value || "/demand-h5.html"), "http://localhost");
-  if (!new Set(["/", "/index.html", "/demand-h5.html", "/demand", "/demand/"]).has(target.pathname)) {
+  if (!new Set(["/", "/index.html", "/demand-h5.html", "/demand", "/demand/", "/watchdog-feedback.html"]).has(target.pathname)) {
     return "/demand-h5.html";
+  }
+  if (target.pathname === "/watchdog-feedback.html") {
+    const feedbackRef = String(target.searchParams.get("ref") || "").trim().toLowerCase();
+    target.search = "";
+    target.hash = "";
+    if (/^[a-f0-9]{12}$/.test(feedbackRef)) {
+      target.searchParams.set("ref", feedbackRef);
+    }
+    return `${target.pathname}${target.search}`;
   }
   target.searchParams.delete("code");
   target.searchParams.delete("state");
@@ -1370,38 +1379,57 @@ function createAdminServer(options) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/watchdog/app-feedback") {
+      const taskIdValue = url.searchParams.get("taskId") || "";
+      const tokenValue = url.searchParams.get("token") || "";
+      const feedbackRef = url.searchParams.get("ref") || "";
+      const legacyAccess = Boolean(String(taskIdValue).trim() || String(tokenValue).trim());
+      const identity = legacyAccess ? null : requireDemandH5Identity(req, res, url.pathname);
+      if (!legacyAccess && !identity) return true;
       const result = modules.watchdog && typeof modules.watchdog.getAppFeedbackTask === "function"
         ? modules.watchdog.getAppFeedbackTask({
-          taskId: url.searchParams.get("taskId") || "",
-          token: url.searchParams.get("token") || ""
+          taskId: taskIdValue,
+          token: tokenValue,
+          ref: feedbackRef,
+          assigneeUserId: identity && identity.userId ? identity.userId : ""
         })
         : { ok: false, message: "盯梢应用反馈模块未就绪" };
       logger.info("Watchdog app feedback page requested", {
-        taskId: url.searchParams.get("taskId") || "",
+        accessMode: legacyAccess ? "legacy_token" : "signed_identity",
+        taskId: legacyAccess ? taskIdValue : "",
+        feedbackRef: legacyAccess ? "" : feedbackRef,
+        identityUserId: identity && identity.userId ? identity.userId : "",
         ok: Boolean(result.ok)
       });
-      sendJson(res, result.ok ? 200 : 400, result);
+      sendJson(res, result.ok ? 200 : (Number(result.statusCode) || 400), result);
       return true;
     }
 
     if (req.method === "POST" && url.pathname === "/api/watchdog/app-feedback") {
       try {
         const body = await readRequestBody(req);
+        const legacyAccess = Boolean(String(body.taskId || "").trim() || String(body.token || "").trim());
+        const identity = legacyAccess ? null : requireDemandH5Identity(req, res, url.pathname);
+        if (!legacyAccess && !identity) return true;
         const result = modules.watchdog && typeof modules.watchdog.submitAppFeedback === "function"
           ? await modules.watchdog.submitAppFeedback({
             taskId: body.taskId,
             token: body.token,
+            ref: body.ref,
+            assigneeUserId: identity && identity.userId ? identity.userId : "",
             action: body.action,
             note: body.note
           })
           : { ok: false, message: "盯梢应用反馈模块未就绪" };
         logger.info("Watchdog app feedback submitted", {
-          taskId: body.taskId || "",
+          accessMode: legacyAccess ? "legacy_token" : "signed_identity",
+          taskId: legacyAccess ? (body.taskId || "") : "",
+          feedbackRef: legacyAccess ? "" : (body.ref || ""),
+          identityUserId: identity && identity.userId ? identity.userId : "",
           action: body.action || "",
           noteLength: String(body.note || "").trim().length,
           ok: Boolean(result.ok)
         });
-        sendJson(res, result.ok ? 200 : 400, result);
+        sendJson(res, result.ok ? 200 : (Number(result.statusCode) || 400), result);
       } catch (error) {
         const info = errorInfo(error, "盯梢应用反馈提交失败");
         logger.warn("Watchdog app feedback submission failed", {

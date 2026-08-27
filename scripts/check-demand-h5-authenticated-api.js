@@ -98,6 +98,25 @@ async function main() {
       },
       listPersonTaskItems: async (options) => ({ ok: true, items: [], options }),
       listMemberTaskItems: async (options) => ({ ok: true, items: [], options })
+    },
+    watchdog: {
+      getAppFeedbackTask: (options) => {
+        captured.watchdogGet = options;
+        if (options.taskId === "legacy-task" && options.token === "legacy-token") {
+          return { ok: true, task: { id: "legacy-task" } };
+        }
+        if (options.ref === "abcdef123456" && options.assigneeUserId === "LiJingJing") {
+          return { ok: true, task: { id: "signed-task" } };
+        }
+        return { ok: false, statusCode: 403, message: "无权访问" };
+      },
+      submitAppFeedback: async (options) => {
+        captured.watchdogSubmit = options;
+        if (options.ref === "abcdef123456" && options.assigneeUserId === "LiJingJing") {
+          return { ok: true, task: { id: "signed-task" }, message: "反馈已记录" };
+        }
+        return { ok: false, statusCode: 403, message: "无权访问" };
+      }
     }
   };
   const noopStatus = { getStatus: () => ({}) };
@@ -127,6 +146,8 @@ async function main() {
   const port = server.address().port;
   const session = createDemandH5Session({ userId: "LiJingJing", name: "李晶晶" }, process.env.TEST_DEMAND_SECRET);
   const cookie = demandH5SessionCookie(session.token, { secure: false }).split(";")[0];
+  const otherSession = createDemandH5Session({ userId: "OtherUser", name: "其他同事" }, process.env.TEST_DEMAND_SECRET);
+  const otherCookie = demandH5SessionCookie(otherSession.token, { secure: false }).split(";")[0];
 
   try {
     const unauthorized = await request(port, "/api/dev-progress/required-field-items?userName=%E9%AB%98%E6%96%87%E7%9B%9B");
@@ -136,6 +157,37 @@ async function main() {
     const identity = await request(port, "/api/dev-progress/h5-session", { cookie });
     assert.strictEqual(identity.statusCode, 200);
     assert.strictEqual(identity.payload.identity.name, "李晶晶");
+
+    const unsignedWatchdogFeedback = await request(port, "/api/watchdog/app-feedback?ref=abcdef123456");
+    assert.strictEqual(unsignedWatchdogFeedback.statusCode, 401);
+    assert.strictEqual(unsignedWatchdogFeedback.payload.code, "demand_session_required");
+
+    const signedWatchdogFeedback = await request(port, "/api/watchdog/app-feedback?ref=abcdef123456", { cookie });
+    assert.strictEqual(signedWatchdogFeedback.statusCode, 200);
+    assert.strictEqual(captured.watchdogGet.assigneeUserId, "LiJingJing");
+    assert.strictEqual(captured.watchdogGet.ref, "abcdef123456");
+
+    const foreignWatchdogFeedback = await request(port, "/api/watchdog/app-feedback?ref=abcdef123456", { cookie: otherCookie });
+    assert.strictEqual(foreignWatchdogFeedback.statusCode, 403);
+
+    const unsignedWatchdogSubmit = await request(port, "/api/watchdog/app-feedback", {
+      method: "POST",
+      body: { ref: "abcdef123456", action: "progress", note: "处理中" }
+    });
+    assert.strictEqual(unsignedWatchdogSubmit.statusCode, 401);
+
+    const signedWatchdogSubmit = await request(port, "/api/watchdog/app-feedback", {
+      method: "POST",
+      cookie,
+      body: { ref: "abcdef123456", action: "progress", note: "处理中" }
+    });
+    assert.strictEqual(signedWatchdogSubmit.statusCode, 200);
+    assert.strictEqual(captured.watchdogSubmit.assigneeUserId, "LiJingJing");
+    assert.strictEqual(captured.watchdogSubmit.note, "处理中");
+
+    const legacyWatchdogFeedback = await request(port, "/api/watchdog/app-feedback?taskId=legacy-task&token=legacy-token");
+    assert.strictEqual(legacyWatchdogFeedback.statusCode, 200);
+    assert.strictEqual(legacyWatchdogFeedback.payload.task.id, "legacy-task");
 
     const requiredFields = await request(port, "/api/dev-progress/required-field-items?userName=%E9%AB%98%E6%96%87%E7%9B%9B&scope=fallback", { cookie });
     assert.strictEqual(requiredFields.statusCode, 200);
@@ -161,6 +213,17 @@ async function main() {
     assert.match(qrLogin.headers.location, /^https:\/\/login\.work\.weixin\.qq\.com\/wwlogin\/sso\/login\?/);
     assert.match(qrLogin.headers.location, /login_type=CorpApp/);
 
+    const feedbackLogout = await request(port, "/demand-web-logout?returnTo=%2Fwatchdog-feedback.html%3Fref%3Dabcdef123456%26token%3Dshould-not-pass%23taskId%3Dhidden");
+    assert.strictEqual(feedbackLogout.statusCode, 302);
+    const feedbackLoginLocation = new URL(feedbackLogout.headers.location, "http://localhost");
+    assert.strictEqual(feedbackLoginLocation.pathname, "/demand-login.html");
+    assert.strictEqual(feedbackLoginLocation.searchParams.get("returnTo"), "/watchdog-feedback.html?ref=abcdef123456");
+
+    const externalLogout = await request(port, "/demand-web-logout?returnTo=https%3A%2F%2Fevil.example%2Fwatchdog-feedback.html%3Fref%3Dabcdef123456");
+    assert.strictEqual(externalLogout.statusCode, 302);
+    const externalLoginLocation = new URL(externalLogout.headers.location, "http://localhost");
+    assert.strictEqual(externalLoginLocation.searchParams.get("returnTo"), "/watchdog-feedback.html?ref=abcdef123456");
+
     console.log(JSON.stringify({
       passed: true,
       checks: {
@@ -169,7 +232,12 @@ async function main() {
         queryNameImpersonationBlocked: true,
         draftNameImpersonationBlocked: true,
         supplementNameImpersonationBlocked: true,
-        pcQrLoginRedirectCreated: true
+        pcQrLoginRedirectCreated: true,
+        watchdogFeedbackRequiresSession: true,
+        watchdogFeedbackUsesSignedUserId: true,
+        watchdogFeedbackRejectsOtherUser: true,
+        watchdogLegacyTokenStillAccepted: true,
+        watchdogFeedbackReturnPathSanitized: true
       }
     }, null, 2));
   } finally {
