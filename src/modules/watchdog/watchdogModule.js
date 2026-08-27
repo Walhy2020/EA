@@ -29,6 +29,19 @@ const APP_FEEDBACK_NOTE_MAX_LENGTH = 500;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
 const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
+const APP_SITUATION_QUESTION_KEY = "ea_watch_situation";
+const APP_SITUATION_OPTIONS = Object.freeze([
+  { id: "none", text: "无补充", note: "" },
+  { id: "on_track", text: "按计划推进", note: "按计划推进" },
+  { id: "waiting_confirm", text: "等待确认", note: "等待确认" },
+  { id: "waiting_resource", text: "等待资源", note: "等待资源" },
+  { id: "waiting_integration", text: "等待联调", note: "等待联调" },
+  { id: "waiting_test", text: "等待测试", note: "等待测试" },
+  { id: "technical_block", text: "技术困难", note: "技术困难" },
+  { id: "coordination_needed", text: "需要协调", note: "需要协调" },
+  { id: "schedule_risk", text: "进度有风险", note: "进度有风险" },
+  { id: "delayed", text: "计划延期", note: "计划延期" }
+]);
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
 const WORKDAY_SCHEDULE_TEXT = "(?:工作日|工作天|周一\\s*(?:到|至|-|~)\\s*周?五|星期一\\s*(?:到|至|-|~)\\s*(?:星期)?五|礼拜一\\s*(?:到|至|-|~)\\s*(?:礼拜)?五)";
 const CLOCK_SCHEDULE_TEXT = "\\s*(上午|早上|下午|晚上|中午)?\\s*(\\d{1,2})(?:\\s*(?:[:：点时])\\s*(\\d{1,2})?\\s*分?)?";
@@ -789,6 +802,30 @@ function statusLabel(key) {
   return labels[key] || key || "";
 }
 
+function appSituationSelection() {
+  return {
+    question_key: APP_SITUATION_QUESTION_KEY,
+    title: "当前情况",
+    selected_id: "none",
+    option_list: APP_SITUATION_OPTIONS.map((item) => ({
+      id: item.id,
+      text: item.text
+    }))
+  };
+}
+
+function appSituationFromSelectedItems(selectedItems) {
+  const item = (Array.isArray(selectedItems) ? selectedItems : []).find((candidate) => (
+    normalizeText(candidate && (candidate.questionKey || candidate.question_key)) === APP_SITUATION_QUESTION_KEY
+  ));
+  const optionIds = Array.isArray(item && item.optionIds)
+    ? item.optionIds
+    : (Array.isArray(item && item.option_ids) ? item.option_ids : []);
+  const selectedId = normalizeText(optionIds[0]);
+  const selected = APP_SITUATION_OPTIONS.find((option) => option.id === selectedId);
+  return selected || APP_SITUATION_OPTIONS[0];
+}
+
 function initialActionLabel(key) {
   const labels = {
     ea_watch_initial_received: "收到",
@@ -1241,13 +1278,15 @@ function cardUpdateForResponse(task, label, options = {}) {
   }
   const completed = task.status === "completed";
   const nativeApp = options.source === "wecom-app-native";
-  const desc = completed
+  const note = normalizeText(options.note);
+  const recorded = `已记录：${label}${note ? `；当前情况：${note}` : ""}。`;
+  const nextStep = completed
     ? "这条任务已停止盯梢。"
     : task.awaitingRescheduleFrom
       ? (nativeApp
-        ? `已记录：${label}。请联系发起人另行设置下一次提醒时间。`
-        : `已记录：${label}。请在对话里补充新的提醒时间，或回复循环时间。`)
-      : `已记录：${label}。下次会继续按间隔盯梢。`;
+        ? "请联系发起人另行设置下一次提醒时间。"
+        : "请在对话里补充新的提醒时间，或回复循环时间。")
+      : "下次会继续按间隔盯梢。";
   return {
     card_type: "text_notice",
     source: {
@@ -1256,8 +1295,9 @@ function cardUpdateForResponse(task, label, options = {}) {
     },
     main_title: {
       title: completed ? "盯梢已完成" : "进度已收到",
-      desc
+      desc: recorded
     },
+    sub_title_text: nextStep,
     card_action: {
       type: 1,
       url: "https://work.weixin.qq.com"
@@ -2561,7 +2601,6 @@ function createWatchdogModule(options = {}) {
 
   function appNativeReminderCard(task, tipType) {
     const isInitial = tipType === "watchdog_initial";
-    const feedbackUrl = isInitial ? "" : appFeedbackUrlForTask(task);
     const contents = [
       watchdogTaskIdCardItem(task),
       { keyname: "发起人", value: requesterDisplayName(task) },
@@ -2569,14 +2608,6 @@ function createWatchdogModule(options = {}) {
     ];
     const remark = remarkCardItem(task);
     if (remark) contents.push(remark);
-    if (feedbackUrl) {
-      contents.push({
-        keyname: "当前情况说明",
-        value: "点击填写",
-        type: 1,
-        url: feedbackUrl
-      });
-    }
     return {
       card_type: "button_interaction",
       source: { desc: "EA盯梢", desc_color: 0 },
@@ -2584,13 +2615,9 @@ function createWatchdogModule(options = {}) {
         title: appPushHeadline(tipType),
         desc: truncate(task.content, 60)
       },
-      ...(feedbackUrl ? {
-        card_action: {
-          type: 1,
-          url: feedbackUrl
-        }
-      } : {}),
+      card_action: { type: 0 },
       horizontal_content_list: contents.filter(Boolean),
+      ...(isInitial ? {} : { button_selection: appSituationSelection() }),
       button_list: isInitial
         ? [
             { text: "正在处理", key: "ea_watch_initial_received", style: 1 },
@@ -5182,7 +5209,8 @@ function createWatchdogModule(options = {}) {
 
     const label = statusLabel(summary.eventKey);
     const now = new Date().toISOString();
-    const feedbackNote = normalizeText(summary.feedbackNote);
+    const situation = appSituationFromSelectedItems(summary.selectedItems);
+    const feedbackNote = normalizeText(summary.feedbackNote || situation.note);
     task.responses = Array.isArray(task.responses) ? task.responses : [];
     task.responses.push({
       receivedAt: now,
@@ -5298,6 +5326,8 @@ function createWatchdogModule(options = {}) {
       logger.info("Watchdog card response received", {
         taskId: task.id,
         eventKey: summary.eventKey,
+        situationId: situation.id,
+        noteLength: feedbackNote.length,
         completed: task.status === "completed"
       });
     }
@@ -5305,7 +5335,10 @@ function createWatchdogModule(options = {}) {
     return {
       handled: true,
       task,
-      updateCard: cardUpdateForResponse(task, label, { source: sender && sender.source ? sender.source : "" })
+      updateCard: cardUpdateForResponse(task, label, {
+        source: sender && sender.source ? sender.source : "",
+        note: feedbackNote
+      })
     };
   }
 

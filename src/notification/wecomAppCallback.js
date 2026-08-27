@@ -20,6 +20,38 @@ function xmlValue(xml, name) {
   return trimText(match && (match[1] !== undefined ? match[1] : match[2]));
 }
 
+function xmlValues(xml, name) {
+  const escaped = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = new RegExp(`<${escaped}>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/${escaped}>`, "g");
+  const values = [];
+  let match;
+  while ((match = expression.exec(String(xml || ""))) !== null) {
+    const value = trimText(match[1] !== undefined ? match[1] : match[2]);
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function xmlBlocks(xml, name) {
+  const escaped = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = new RegExp(`<${escaped}>([\\s\\S]*?)<\\/${escaped}>`, "g");
+  const blocks = [];
+  let match;
+  while ((match = expression.exec(String(xml || ""))) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function selectedItemsFromXml(xml) {
+  return xmlBlocks(xml, "SelectedItem")
+    .map((block) => ({
+      questionKey: xmlValue(block, "QuestionKey"),
+      optionIds: xmlValues(block, "OptionId")
+    }))
+    .filter((item) => item.questionKey && item.optionIds.length > 0);
+}
+
 function signatureFor(values) {
   return crypto.createHash("sha1").update(values.map(trimText).sort().join("")).digest("hex");
 }
@@ -154,6 +186,7 @@ function createWecomAppCallback(options = {}) {
     const eventKey = xmlValue(payload, "EventKey");
     const senderUserId = xmlValue(payload, "FromUserName");
     const responseCode = xmlValue(payload, "ResponseCode");
+    const selectedItems = selectedItemsFromXml(payload);
     if (event !== "template_card_event" || !taskId.startsWith("ea_watch_")) {
       if (logger && typeof logger.info === "function") {
         logger.info("WeCom app callback ignored", { event, taskId, eventKey, senderConfigured: Boolean(senderUserId) });
@@ -164,7 +197,7 @@ function createWecomAppCallback(options = {}) {
       if (logger && typeof logger.warn === "function") logger.warn("WeCom watchdog app callback unavailable", { taskId, eventKey });
       return;
     }
-    const result = await watchdog.handleTemplateCardEvent({ taskId, eventKey }, {
+    const result = await watchdog.handleTemplateCardEvent({ taskId, eventKey, selectedItems }, {
       userId: senderUserId,
       source: "wecom-app-native"
     });
@@ -198,7 +231,9 @@ function createWecomAppCallback(options = {}) {
         senderConfigured: Boolean(senderUserId),
         handled: Boolean(result && result.handled),
         cardUpdated,
-        responseCodeConfigured: Boolean(responseCode)
+        responseCodeConfigured: Boolean(responseCode),
+        selectedItemCount: selectedItems.length,
+        selectedQuestionKeys: selectedItems.map((item) => item.questionKey)
       });
     }
   }

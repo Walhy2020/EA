@@ -80,7 +80,23 @@ function request(port, method, pathname, body = "") {
   });
 }
 
-function eventXml({ taskId, eventKey, userId = "assignee" }) {
+function selectedItemsXml(selectedItems) {
+  if (!Array.isArray(selectedItems) || selectedItems.length === 0) return "";
+  return [
+    "<SelectedItems>",
+    ...selectedItems.map((item) => [
+      "<SelectedItem>",
+      `<QuestionKey><![CDATA[${item.questionKey}]]></QuestionKey>`,
+      "<OptionIds>",
+      ...(item.optionIds || []).map((optionId) => `<OptionId><![CDATA[${optionId}]]></OptionId>`),
+      "</OptionIds>",
+      "</SelectedItem>"
+    ].join("")),
+    "</SelectedItems>"
+  ].join("");
+}
+
+function eventXml({ taskId, eventKey, userId = "assignee", selectedItems = [] }) {
   return [
     "<xml>",
     `<ToUserName><![CDATA[${corpId}]]></ToUserName>`,
@@ -89,6 +105,7 @@ function eventXml({ taskId, eventKey, userId = "assignee" }) {
     "<Event><![CDATA[template_card_event]]></Event>",
     `<EventKey><![CDATA[${eventKey}]]></EventKey>`,
     `<TaskId><![CDATA[${taskId}]]></TaskId>`,
+    selectedItemsXml(selectedItems),
     "<ResponseCode><![CDATA[test-response-code]]></ResponseCode>",
     "</xml>"
   ].join("");
@@ -172,6 +189,7 @@ async function main() {
       return { errcode: 0 };
     }
   });
+  const callbackWarnings = [];
   const callback = createWecomAppCallback({
     appMessage: {
       corpIdEnv: "TEST_APP_CORP_ID",
@@ -184,7 +202,7 @@ async function main() {
     },
     watchdog,
     appNotifier,
-    logger: { info() {}, warn() {} }
+    logger: { info() {}, warn(...args) { callbackWarnings.push(args); } }
   });
   const server = http.createServer((req, res) => {
     Promise.resolve(callback.handleRequest(req, res, new URL(req.url, "http://localhost"))).catch((error) => {
@@ -226,10 +244,16 @@ async function main() {
     assert.equal(unknown.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_active").responses.length, 0);
 
-    const progress = await sendEvent({ taskId: "ea_watch_wd_active_3", eventKey: "ea_watch_progress" });
-    assert.equal(progress.statusCode, 200);
+    const progress = await sendEvent({
+      taskId: "ea_watch_wd_active_3",
+      eventKey: "ea_watch_progress",
+      selectedItems: [{ questionKey: "ea_watch_situation", optionIds: ["waiting_integration"] }]
+    });
+    assert.equal(progress.statusCode, 200, `${progress.body} ${JSON.stringify(callbackWarnings.slice(-1))}`);
     assert.equal(taskById(storeFile, "wd_active").responses.length, 1);
     assert.equal(taskById(storeFile, "wd_active").responses[0].source, "wecom-app-native");
+    assert.equal(taskById(storeFile, "wd_active").responses[0].note, "等待联调");
+    assert.equal(taskById(storeFile, "wd_active").lastFeedbackNote, "等待联调");
 
     const duplicate = await sendEvent({ taskId: "ea_watch_wd_active_3", eventKey: "ea_watch_progress" });
     assert.equal(duplicate.statusCode, 200);
@@ -282,7 +306,8 @@ async function main() {
         nextRunAt: "2026-08-14T05:00:00.000Z",
         firstReminderSentAt: "2026-08-14T04:00:00.000Z",
         initialAckStatus: "received",
-        initialAckAt: "2026-08-14T04:00:00.000Z"
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        appFeedbackToken: "legacy-feedback-token"
       })],
       drafts: []
     }, null, 2)}\n`, "utf8");
@@ -304,24 +329,24 @@ async function main() {
     assert.equal(linkedMessages.length, 1);
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
-    const descriptionEntry = linkedCard.horizontal_content_list.find((item) => item.keyname === "当前情况说明");
-    assert.ok(descriptionEntry);
-    assert.equal(descriptionEntry.value, "点击填写");
-    assert.equal(descriptionEntry.type, 1);
-    assert.equal(linkedCard.card_action.url, descriptionEntry.url);
-    const descriptionUrl = new URL(descriptionEntry.url);
-    assert.equal(descriptionUrl.searchParams.get("taskId"), "wd_linked_reminder");
-    const feedbackToken = descriptionUrl.searchParams.get("token");
-    assert.ok(feedbackToken);
+    assert.deepEqual(linkedCard.card_action, { type: 0 });
+    assert.equal(linkedCard.horizontal_content_list.some((item) => item.url || item.type === 1), false);
+    assert.equal(linkedCard.button_selection.question_key, "ea_watch_situation");
+    assert.equal(linkedCard.button_selection.title, "当前情况");
+    assert.equal(linkedCard.button_selection.selected_id, "none");
+    assert.equal(linkedCard.button_selection.option_list.length, 10);
+    assert.ok(linkedCard.button_selection.option_list.some((item) => item.id === "waiting_integration" && item.text === "等待联调"));
+    assert.ok(linkedCard.button_selection.option_list.every((item) => item.text.length <= 10));
+    assert.equal(JSON.stringify(linkedCard).includes("watchdog-feedback"), false);
 
     const feedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       taskId: "wd_linked_reminder",
-      token: feedbackToken
+      token: "legacy-feedback-token"
     });
     assert.equal(feedbackView.ok, true);
     const overlong = await linkedReminderWatchdog.submitAppFeedback({
       taskId: "wd_linked_reminder",
-      token: feedbackToken,
+      token: "legacy-feedback-token",
       action: "progress",
       note: "进".repeat(501)
     });
@@ -331,7 +356,7 @@ async function main() {
 
     const feedback = await linkedReminderWatchdog.submitAppFeedback({
       taskId: "wd_linked_reminder",
-      token: feedbackToken,
+      token: "legacy-feedback-token",
       action: "progress",
       note: "联调完成，正在观察运行情况"
     });
