@@ -2691,8 +2691,8 @@ function createWatchdogModule(options = {}) {
     const card = {
       card_type: received ? "text_notice" : "button_interaction",
       source: {
-        desc: received ? "EA盯梢 · 已收到" : "NEW · EA盯梢",
-        desc_color: received ? 3 : 2
+        desc: received ? "EA盯梢" : "NEW · EA盯梢",
+        desc_color: received ? 1 : 2
       },
       main_title: {
         title: truncate(task.content, 60),

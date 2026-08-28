@@ -280,8 +280,8 @@ async function main() {
     assert.equal(receivedTask.appCardReceiptEvents[0].eventKey, "ea_watch_card_received");
     const receivedUpdate = cardUpdates.at(-1).templateCard;
     assert.equal(receivedUpdate.card_type, "text_notice");
-    assert.equal(receivedUpdate.source.desc, "EA盯梢 · 已收到");
-    assert.equal(receivedUpdate.source.desc_color, 3);
+    assert.equal(receivedUpdate.source.desc, "EA盯梢");
+    assert.equal(receivedUpdate.source.desc_color, 1);
     assert.equal(receivedUpdate.main_title.title, "隔离回调测试任务-wd_receipt");
     assert.equal(receivedUpdate.main_title.desc, "");
     assert.equal(receivedUpdate.card_action.type, 1);
