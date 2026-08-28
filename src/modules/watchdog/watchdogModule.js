@@ -245,15 +245,6 @@ function watchdogTaskIdCardItem(task = {}) {
     : null;
 }
 
-function mutedWatchdogTaskIdCardItem(task = {}) {
-  const id = watchdogTaskId(task);
-  return id
-    ? {
-        keyname: `任务ID：${id}`
-      }
-    : null;
-}
-
 function minutesFromIntervalUnit(value, unit) {
   if (!Number.isFinite(value) || value <= 0) {
     return null;
@@ -2698,7 +2689,7 @@ function createWatchdogModule(options = {}) {
     const contents = [
       { keyname: "发起人", value: requesterDisplayName(task) },
       { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) },
-      mutedWatchdogTaskIdCardItem(task)
+      watchdogTaskIdCardItem(task)
     ];
     const card = {
       card_type: received ? "text_notice" : "button_interaction",

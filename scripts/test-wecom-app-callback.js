@@ -511,10 +511,11 @@ async function main() {
     assert.equal(linkedDetail.url, linkedCard.card_action.url);
     assert.deepEqual(
       linkedCard.horizontal_content_list.map((item) => item.keyname),
-      ["发起人", "盯梢时间", "任务ID：wd_linked_reminder", "详情"]
+      ["发起人", "盯梢时间", "任务ID", "详情"]
     );
-    const mutedTaskId = linkedCard.horizontal_content_list.find((item) => item.keyname === "任务ID：wd_linked_reminder");
-    assert.equal(Object.hasOwn(mutedTaskId, "value"), false);
+    const taskIdItem = linkedCard.horizontal_content_list.find((item) => item.keyname === "任务ID");
+    assert.equal(taskIdItem.value, "wd_linked_reminder");
+    assert.equal(taskIdItem.type, undefined);
     const feedbackAuthorizeUrl = new URL(linkedDetail.url);
     assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
     assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");
@@ -547,6 +548,12 @@ async function main() {
     assert.match(feedbackPageScript, /renderFeedbackHistory/);
     assert.match(feedbackPageHtml, /id="feedbackHistoryList"/);
     assert.match(feedbackPageHtml, /历史反馈记录/);
+    assert.doesNotMatch(feedbackPageHtml, /class="eyebrow"/);
+    assert.doesNotMatch(feedbackPageHtml, /id="modeText"/);
+    assert.ok(feedbackPageHtml.indexOf('id="remarkBlock"') < feedbackPageHtml.indexOf('class="task-details"'));
+    assert.ok(feedbackPageHtml.indexOf('id="requesterName"') < feedbackPageHtml.indexOf('id="assigneeName"'));
+    assert.ok(feedbackPageHtml.indexOf('id="assigneeName"') < feedbackPageHtml.indexOf('id="scheduleText"'));
+    assert.ok(feedbackPageHtml.indexOf('id="scheduleText"') < feedbackPageHtml.indexOf('id="taskId"'));
 
     const signedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       ref: feedbackCardUrl.searchParams.get("ref"),

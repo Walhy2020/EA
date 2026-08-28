@@ -22,7 +22,6 @@
     taskId: document.getElementById("taskId"),
     assignee: document.getElementById("assigneeName"),
     requester: document.getElementById("requesterName"),
-    mode: document.getElementById("modeText"),
     schedule: document.getElementById("scheduleText"),
     remarkBlock: document.getElementById("remarkBlock"),
     remark: document.getElementById("remarkText"),
@@ -172,7 +171,6 @@
     elements.taskId.textContent = task.id || state.taskId || "-";
     elements.assignee.textContent = task.assigneeName || "-";
     elements.requester.textContent = task.requesterName || "-";
-    elements.mode.textContent = task.modeText || "-";
     elements.schedule.textContent = task.schedule || "-";
     elements.remark.textContent = task.remark || "";
     elements.remarkBlock.hidden = !task.remark;

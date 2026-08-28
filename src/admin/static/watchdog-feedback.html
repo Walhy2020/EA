@@ -4,15 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f3f7f8">
-  <title>需求进度管理 - 盯梢反馈</title>
-  <link rel="stylesheet" href="./watchdog-feedback.css?v=0.1.6">
+  <title>盯梢任务反馈</title>
+  <link rel="stylesheet" href="./watchdog-feedback.css?v=0.1.7">
 </head>
 <body>
   <main class="app-shell">
     <header class="page-header">
-      <p class="eyebrow">需求进度管理</p>
       <div class="header-line">
-      <h1>盯梢任务反馈</h1>
+        <h1>盯梢任务反馈</h1>
         <span id="statusBadge" class="status-badge">加载中</span>
       </div>
     </header>
@@ -22,33 +21,28 @@
 
     <section id="taskPanel" class="task-panel" hidden>
       <h2 id="taskContent"></h2>
+      <section id="remarkBlock" class="remark-block task-remark" hidden>
+        <p class="section-label">备注</p>
+        <p id="remarkText"></p>
+      </section>
       <dl class="task-details">
-        <div>
-          <dt>任务 ID</dt>
-          <dd id="taskId" class="task-id-value"></dd>
-        </div>
-        <div>
-          <dt>被盯梢人</dt>
-          <dd id="assigneeName"></dd>
-        </div>
         <div>
           <dt>发起人</dt>
           <dd id="requesterName"></dd>
         </div>
         <div>
-          <dt>盯梢模式</dt>
-          <dd id="modeText"></dd>
+          <dt>被盯梢人</dt>
+          <dd id="assigneeName"></dd>
         </div>
-        <div>
+        <div class="detail-wide">
           <dt>盯梢时间</dt>
           <dd id="scheduleText"></dd>
         </div>
+        <div class="detail-wide">
+          <dt>任务 ID</dt>
+          <dd id="taskId" class="task-id-value"></dd>
+        </div>
       </dl>
-
-      <section id="remarkBlock" class="remark-block" hidden>
-        <p class="section-label">备注</p>
-        <p id="remarkText"></p>
-      </section>
       <section id="attachmentBlock" class="remark-block" hidden>
         <p class="section-label">附件</p>
         <p id="attachmentText"></p>
@@ -78,8 +72,8 @@
       <p id="actionMessage" class="action-message" aria-live="polite"></p>
     </section>
 
-    <footer>需求进度管理 · EA盯梢反馈 v0.1.6</footer>
+    <footer>需求进度管理 · EA盯梢反馈 v0.1.7</footer>
   </main>
-  <script src="./watchdog-feedback.js?v=0.1.6"></script>
+  <script src="./watchdog-feedback.js?v=0.1.7"></script>
 </body>
 </html>
