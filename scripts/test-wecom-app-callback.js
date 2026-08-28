@@ -11,6 +11,7 @@ const {
   createWatchdogModule
 } = require("../src/modules/watchdog/watchdogModule");
 const { createWecomAppCallback } = require("../src/notification/wecomAppCallback");
+const { createWecomAppNotifier } = require("../src/notification/wecomAppNotifier");
 const { verifyDemandH5State } = require("../src/admin/demandH5AuthState");
 
 const callbackToken = "callback-test-token";
@@ -157,6 +158,28 @@ async function main() {
   process.env.TEST_FEEDBACK_CORP_ID = corpId;
   process.env.TEST_FEEDBACK_AGENT_ID = "1000011";
   process.env.TEST_FEEDBACK_SECRET = feedbackSecret;
+  process.env.TEST_RECALL_CORP_ID = "recall-corp";
+  process.env.TEST_RECALL_AGENT_ID = "1000012";
+  process.env.TEST_RECALL_SECRET = "recall-secret";
+
+  const recallRequests = [];
+  const recallNotifier = createWecomAppNotifier({
+    appMessage: {
+      corpIdEnv: "TEST_RECALL_CORP_ID",
+      agentIdEnv: "TEST_RECALL_AGENT_ID",
+      secretEnv: "TEST_RECALL_SECRET"
+    },
+    getJson: async () => ({ errcode: 0, access_token: "recall-access-token", expires_in: 7200 }),
+    postJson: async (url, body) => {
+      recallRequests.push({ url, body });
+      return { errcode: 0, errmsg: "ok" };
+    }
+  });
+  const recalled = await recallNotifier.recallMessage({ msgid: "recall-message-id", purpose: "watchdog_cancel" });
+  assert.equal(recalled.ok, true);
+  assert.equal(recallRequests.length, 1);
+  assert.match(recallRequests[0].url, /\/cgi-bin\/message\/recall\?access_token=recall-access-token$/);
+  assert.deepEqual(recallRequests[0].body, { msgid: "recall-message-id" });
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ea-wecom-app-callback-"));
   const storeFile = path.join(directory, "watchdog-tasks.json");
@@ -165,7 +188,22 @@ async function main() {
     fixture("wd_receipt", { remark: "收到前备注" }),
     fixture("wd_completed", { status: "completed", nextRunAt: "" }),
     fixture("wd_once", { mode: "once", dueAt: "2026-08-14T07:00:00.000Z" }),
-    fixture("wd_initial")
+    fixture("wd_initial"),
+    fixture("wd_cancel_recall", {
+      appPushLastMessageId: "cancel-card-message-id",
+      appPushLastSentAt: new Date(Date.now() - 60 * 1000).toISOString(),
+      appPushLastMessageType: "watchdog_progress"
+    }),
+    fixture("wd_cancel_expired", {
+      appPushLastMessageId: "expired-card-message-id",
+      appPushLastSentAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+      appPushLastMessageType: "watchdog_progress"
+    }),
+    fixture("wd_cancel_recall_failed", {
+      appPushLastMessageId: "failed-card-message-id",
+      appPushLastSentAt: new Date(Date.now() - 60 * 1000).toISOString(),
+      appPushLastMessageType: "watchdog_progress"
+    })
   ];
   fs.writeFileSync(storeFile, `${JSON.stringify({ tasks, drafts: [] }, null, 2)}\n`, "utf8");
 
@@ -173,6 +211,7 @@ async function main() {
   const callbackAppMessages = [];
   let cardUpdateCount = 0;
   const cardUpdates = [];
+  const recalledCardMessageIds = [];
   const appNotifier = {
     getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
     send: async (message) => {
@@ -183,6 +222,13 @@ async function main() {
       cardUpdateCount += 1;
       cardUpdates.push(options);
       return { ok: true };
+    },
+    recallMessage: async (options) => {
+      recalledCardMessageIds.push(options.msgid);
+      if (options.msgid === "failed-card-message-id") {
+        throw new Error("isolated recall failure");
+      }
+      return { ok: true, msgid: options.msgid };
     }
   };
   const watchdog = createWatchdogModule({
@@ -195,7 +241,8 @@ async function main() {
         agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
         secretEnv: "TEST_FEEDBACK_SECRET",
         nativeCard: { enabled: true }
-      }
+      },
+      sendQueue: { minIntervalMs: 1 }
     },
     appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
     appNotifier,
@@ -283,7 +330,8 @@ async function main() {
     assert.equal(receivedUpdate.source.desc, "EA盯梢");
     assert.equal(receivedUpdate.source.desc_color, 1);
     assert.equal(receivedUpdate.main_title.title, "隔离回调测试任务-wd_receipt");
-    assert.equal(receivedUpdate.main_title.desc, "备注：收到前备注");
+    assert.equal(receivedUpdate.main_title.desc, "");
+    assert.equal(receivedUpdate.sub_title_text, "备注：收到前备注");
     assert.equal(receivedUpdate.card_action.type, 1);
     assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.equal(receivedUpdate.button_list, undefined);
@@ -441,13 +489,16 @@ async function main() {
     });
     await linkedReminderWatchdog.tick();
     assert.equal(linkedMessages.length, 1);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").appPushMessages.length, 1);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").appPushMessages[0].msgid, "linked-1");
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
     assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
     assert.equal(linkedCard.source.desc_color, 2);
     assert.equal(linkedCard.main_title.title, "隔离回调测试任务-wd_linked_reminder");
-    assert.equal(linkedCard.main_title.desc, "备注：优先确认联调内容");
+    assert.equal(linkedCard.main_title.desc, "");
+    assert.equal(linkedCard.sub_title_text, "备注：优先确认联调内容");
     assert.equal(linkedCard.card_action.type, 1);
     assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.deepEqual(linkedCard.button_list, [
@@ -460,8 +511,10 @@ async function main() {
     assert.equal(linkedDetail.url, linkedCard.card_action.url);
     assert.deepEqual(
       linkedCard.horizontal_content_list.map((item) => item.keyname),
-      ["发起人", "盯梢时间", "任务ID", "详情"]
+      ["发起人", "盯梢时间", "任务ID：wd_linked_reminder", "详情"]
     );
+    const mutedTaskId = linkedCard.horizontal_content_list.find((item) => item.keyname === "任务ID：wd_linked_reminder");
+    assert.equal(Object.hasOwn(mutedTaskId, "value"), false);
     const feedbackAuthorizeUrl = new URL(linkedDetail.url);
     assert.equal(feedbackAuthorizeUrl.origin, "https://open.weixin.qq.com");
     assert.equal(feedbackAuthorizeUrl.pathname, "/connect/oauth2/authorize");
@@ -591,6 +644,52 @@ async function main() {
     assert.equal(expiredControlCardSendCount, 0);
     assert.equal(expiredControlWatchdog.getStatus().queuedControlCardCount, 0);
     expiredControlWatchdog.stop();
+
+    const cancelResult = await watchdog.handle({
+      route: {
+        task: {
+          action: "cancel_watchdog",
+          params: {
+            confirmed: true,
+            taskId: "wd_cancel_recall",
+            canceledVia: "test"
+          }
+        }
+      },
+      sender: { userId: "requester", name: "发起同事" }
+    });
+    assert.equal(cancelResult.ok, true);
+    assert.equal(taskById(storeFile, "wd_cancel_recall").status, "canceled");
+    assert.deepEqual(recalledCardMessageIds, ["cancel-card-message-id"]);
+    assert.ok(taskById(storeFile, "wd_cancel_recall").appPushMessages[0].recalledAt);
+
+    const expiredCancelResult = await watchdog.handle({
+      route: {
+        task: {
+          action: "cancel_watchdog",
+          params: { confirmed: true, taskId: "wd_cancel_expired", canceledVia: "test" }
+        }
+      },
+      sender: { userId: "requester", name: "发起同事" }
+    });
+    assert.equal(expiredCancelResult.ok, true);
+    assert.equal(taskById(storeFile, "wd_cancel_expired").status, "canceled");
+    assert.equal(recalledCardMessageIds.includes("expired-card-message-id"), false);
+    assert.equal(taskById(storeFile, "wd_cancel_expired").appPushMessages[0].recallSkipReason, "expired_over_24h");
+
+    const failedCancelResult = await watchdog.handle({
+      route: {
+        task: {
+          action: "cancel_watchdog",
+          params: { confirmed: true, taskId: "wd_cancel_recall_failed", canceledVia: "test" }
+        }
+      },
+      sender: { userId: "requester", name: "发起同事" }
+    });
+    assert.equal(failedCancelResult.ok, true);
+    assert.equal(taskById(storeFile, "wd_cancel_recall_failed").status, "canceled");
+    assert.equal(recalledCardMessageIds.includes("failed-card-message-id"), true);
+    assert.match(taskById(storeFile, "wd_cancel_recall_failed").appPushRecallLastError, /1 条/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

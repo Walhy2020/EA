@@ -32,6 +32,8 @@ const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
 const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
 const MAX_APP_CARD_RECEIPT_EVENTS_PER_TASK = 200;
+const MAX_APP_PUSH_MESSAGE_RECORDS_PER_TASK = 24;
+const WECOM_APP_MESSAGE_RECALL_WINDOW_MS = 24 * 60 * 60 * 1000;
 const APP_SITUATION_QUESTION_KEY = "ea_watch_situation";
 const APP_SITUATION_OPTIONS = Object.freeze([
   { id: "none", text: "无补充", note: "" },
@@ -239,6 +241,15 @@ function watchdogTaskIdCardItem(task = {}) {
     ? {
         keyname: "任务ID",
         value: id
+      }
+    : null;
+}
+
+function mutedWatchdogTaskIdCardItem(task = {}) {
+  const id = watchdogTaskId(task);
+  return id
+    ? {
+        keyname: `任务ID：${id}`
       }
     : null;
 }
@@ -2683,10 +2694,11 @@ function createWatchdogModule(options = {}) {
     const feedbackUrl = appFeedbackUrlForTask(task);
     const received = Boolean(options.received);
     const cardTaskId = normalizeText(options.cardTaskId) || appNativeCardTaskId(task, tipType);
+    const remark = taskRemarkText(task);
     const contents = [
       { keyname: "发起人", value: requesterDisplayName(task) },
       { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) },
-      watchdogTaskIdCardItem(task)
+      mutedWatchdogTaskIdCardItem(task)
     ];
     const card = {
       card_type: received ? "text_notice" : "button_interaction",
@@ -2696,8 +2708,9 @@ function createWatchdogModule(options = {}) {
       },
       main_title: {
         title: truncate(task.content, 60),
-        desc: taskRemarkText(task) ? truncate(`备注：${taskRemarkText(task)}`, 60) : ""
+        desc: ""
       },
+      ...(remark ? { sub_title_text: truncate(`备注：${remark}`, 160) } : {}),
       card_action: feedbackUrl
         ? { type: 1, url: feedbackUrl }
         : { type: 1, url: "https://work.weixin.qq.com" },
@@ -2828,6 +2841,129 @@ function createWatchdogModule(options = {}) {
     };
   }
 
+  function rememberAppPushMessage(task, message = {}) {
+    const msgid = normalizeText(message.msgid);
+    if (!msgid) {
+      return;
+    }
+    const records = Array.isArray(task.appPushMessages)
+      ? task.appPushMessages.filter((item) => item && normalizeText(item.msgid))
+      : [];
+    const existing = records.find((item) => normalizeText(item.msgid) === msgid);
+    const next = {
+      msgid,
+      sentAt: normalizeText(message.sentAt),
+      tipType: normalizeText(message.tipType),
+      messageType: normalizeText(message.messageType)
+    };
+    if (existing) {
+      Object.assign(existing, next);
+    } else {
+      records.push(next);
+    }
+    task.appPushMessages = records.slice(-MAX_APP_PUSH_MESSAGE_RECORDS_PER_TASK);
+  }
+
+  function appPushRecallRecords(task) {
+    const records = Array.isArray(task.appPushMessages)
+      ? task.appPushMessages.filter((item) => item && normalizeText(item.msgid))
+      : [];
+    const lastMessageId = normalizeText(task.appPushLastMessageId);
+    if (lastMessageId && !records.some((item) => normalizeText(item.msgid) === lastMessageId)) {
+      records.push({
+        msgid: lastMessageId,
+        sentAt: normalizeText(task.appPushLastSentAt),
+        tipType: normalizeText(task.appPushLastMessageType),
+        messageType: ""
+      });
+    }
+    task.appPushMessages = records.slice(-MAX_APP_PUSH_MESSAGE_RECORDS_PER_TASK);
+    return task.appPushMessages;
+  }
+
+  async function recallWatchdogAppMessages(task) {
+    const now = new Date();
+    const nowMs = now.getTime();
+    const records = appPushRecallRecords(task);
+    const pending = records.filter((item) => !normalizeText(item.recalledAt));
+    const summary = {
+      requestedCount: pending.length,
+      recalledCount: 0,
+      expiredCount: 0,
+      failedCount: 0,
+      skippedCount: 0
+    };
+    if (pending.length === 0) {
+      return summary;
+    }
+    if (!appNotifier || typeof appNotifier.recallMessage !== "function") {
+      summary.skippedCount = pending.length;
+      task.appPushRecallLastAttemptAt = now.toISOString();
+      task.appPushRecallLastError = "企业微信自建应用发送器不支持消息撤回";
+      save();
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app card recall skipped", {
+          taskId: task.id,
+          requestedCount: pending.length,
+          reason: "recall_not_supported"
+        });
+      }
+      return summary;
+    }
+
+    for (const item of pending) {
+      const sentAtMs = dateValueMs(item.sentAt);
+      if (sentAtMs && nowMs - sentAtMs > WECOM_APP_MESSAGE_RECALL_WINDOW_MS) {
+        item.recallSkippedAt = now.toISOString();
+        item.recallSkipReason = "expired_over_24h";
+        summary.expiredCount += 1;
+        continue;
+      }
+      try {
+        const result = await appNotifier.recallMessage({
+          msgid: item.msgid,
+          purpose: "watchdog_cancel"
+        });
+        if (!result || !result.ok) {
+          const reason = normalizeText(result && result.reason) || "wecom_app_recall_not_sent";
+          item.recallFailedAt = new Date().toISOString();
+          item.recallError = reason;
+          summary.failedCount += 1;
+          continue;
+        }
+        item.recalledAt = new Date().toISOString();
+        item.recallError = "";
+        summary.recalledCount += 1;
+      } catch (error) {
+        const info = errorInfo(error, "企业微信盯梢卡撤回失败");
+        item.recallFailedAt = new Date().toISOString();
+        item.recallError = truncate(info.message, 300);
+        summary.failedCount += 1;
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("Watchdog app card recall failed", {
+            taskId: task.id,
+            errcode: info.errcode,
+            errmsg: info.errmsg,
+            message: info.message
+          });
+        }
+      }
+    }
+    task.appPushRecallLastAttemptAt = new Date().toISOString();
+    task.appPushRecallLastError = summary.failedCount > 0
+      ? `${summary.failedCount} 条企业微信盯梢卡撤回失败`
+      : "";
+    task.updatedAt = task.appPushRecallLastAttemptAt;
+    save();
+    if (logger && typeof logger.info === "function") {
+      logger.info("Watchdog app cards recall finished", {
+        taskId: task.id,
+        ...summary
+      });
+    }
+    return summary;
+  }
+
   async function trySendWatchdogAppPush(task, tipType) {
     if (!isAppPushRequested()) {
       return {
@@ -2870,6 +3006,12 @@ function createWatchdogModule(options = {}) {
       task.appPushLastSentAt = sentAt;
       task.appPushLastMessageType = tipType;
       task.appPushLastMessageId = result.msgid || "";
+      rememberAppPushMessage(task, {
+        msgid: result.msgid || "",
+        sentAt,
+        tipType,
+        messageType: payload.messageType || "text"
+      });
       task.appPushLastError = "";
       task.lastReminderChannel = "wecom-app";
       task.updatedAt = sentAt;
@@ -4865,6 +5007,8 @@ function createWatchdogModule(options = {}) {
     task.updatedAt = now;
     save();
 
+    const appRecallPromise = recallWatchdogAppMessages(task);
+
     if (task.assigneeUserId) {
       try {
         await sendMarkdown(task.assigneeUserId, cancelNoticeToAssigneeText(task), {
@@ -4886,6 +5030,7 @@ function createWatchdogModule(options = {}) {
         }
       }
     }
+    await appRecallPromise;
 
     if (logger && typeof logger.info === "function") {
       logger.info("Watchdog task canceled", {

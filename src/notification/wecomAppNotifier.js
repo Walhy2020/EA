@@ -22,9 +22,11 @@ function createWeComError(prefix, result) {
   return error;
 }
 
-function createWecomAppNotifier(options) {
+function createWecomAppNotifier(options = {}) {
   const appMessage = options.appMessage || {};
   const logger = options.logger;
+  const getJsonRequest = typeof options.getJson === "function" ? options.getJson : getJson;
+  const postJsonRequest = typeof options.postJson === "function" ? options.postJson : postJson;
   const corpIdEnv = appMessage.corpIdEnv || "WECOM_APP_CORP_ID";
   const agentIdEnv = appMessage.agentIdEnv || "WECOM_APP_AGENT_ID";
   const secretEnv = appMessage.secretEnv || "WECOM_APP_SECRET";
@@ -82,7 +84,7 @@ function createWecomAppNotifier(options) {
     if (cachedToken && cachedTokenExpiresAt > Date.now() + 60 * 1000) {
       return cachedToken;
     }
-    const result = await getJson(
+    const result = await getJsonRequest(
       `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(value.corpId)}&corpsecret=${encodeURIComponent(value.secret)}`
     );
     if (Number(result && result.errcode) !== 0 || !result.access_token) {
@@ -191,7 +193,7 @@ function createWecomAppNotifier(options) {
         payload.text = { content: input.text };
       }
     }
-    const result = await postJson(
+    const result = await postJsonRequest(
       `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${encodeURIComponent(accessToken)}`,
       payload
     );
@@ -237,7 +239,7 @@ function createWecomAppNotifier(options) {
       return { ok: false, skipped: true, reason: "更新自建应用模板卡片缺少响应码、卡片或接收成员" };
     }
     const accessToken = await getAccessToken();
-    const result = await postJson(
+    const result = await postJsonRequest(
       `https://qyapi.weixin.qq.com/cgi-bin/message/update_template_card?access_token=${encodeURIComponent(accessToken)}`,
       {
         userids: toUser.split("|").filter(Boolean),
@@ -258,6 +260,36 @@ function createWecomAppNotifier(options) {
     return { ok: true, channel: "wecom-app", result };
   }
 
+  async function recallMessage(input = {}) {
+    const value = credentials();
+    const optionsValue = typeof input === "string" ? { msgid: input } : (input || {});
+    const msgid = trimText(optionsValue.msgid);
+    const purpose = trimText(optionsValue.purpose);
+    if (!hasCredentials()) {
+      return { ok: false, skipped: true, reason: "企业微信自建应用凭证未配置完整" };
+    }
+    if (!msgid) {
+      return { ok: false, skipped: true, reason: "撤回企业微信自建应用消息缺少 msgid" };
+    }
+    const accessToken = await getAccessToken();
+    const result = await postJsonRequest(
+      `https://qyapi.weixin.qq.com/cgi-bin/message/recall?access_token=${encodeURIComponent(accessToken)}`,
+      { msgid }
+    );
+    if (Number(result && result.errcode) !== 0) {
+      throw createWeComError("企业微信自建应用消息撤回失败", result);
+    }
+    if (logger && typeof logger.info === "function") {
+      logger.info("WeCom app message recalled", {
+        channel: "wecom-app",
+        purpose: purpose || "notification",
+        agentId: value.agentId,
+        msgid
+      });
+    }
+    return { ok: true, channel: "wecom-app", msgid, result };
+  }
+
   function getStatus() {
     const value = credentials();
     return {
@@ -273,7 +305,7 @@ function createWecomAppNotifier(options) {
     };
   }
 
-  return { send, updateTemplateCard, getStatus };
+  return { send, updateTemplateCard, recallMessage, getStatus };
 }
 
 module.exports = {
