@@ -2696,7 +2696,7 @@ function createWatchdogModule(options = {}) {
       },
       main_title: {
         title: truncate(task.content, 60),
-        desc: ""
+        desc: taskRemarkText(task) ? truncate(`备注：${taskRemarkText(task)}`, 60) : ""
       },
       card_action: feedbackUrl
         ? { type: 1, url: feedbackUrl }
@@ -2706,11 +2706,11 @@ function createWatchdogModule(options = {}) {
     };
     if (feedbackUrl) {
       if (received) {
-        card.jump_list = [{ title: "详情", type: 1, url: feedbackUrl }];
+        card.jump_list = [{ title: "查看盯梢详情", type: 1, url: feedbackUrl }];
       } else {
         card.horizontal_content_list.push({
           keyname: "详情",
-          value: "查看反馈记录",
+          value: "查看盯梢详情",
           type: 1,
           url: feedbackUrl
         });

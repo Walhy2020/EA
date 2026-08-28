@@ -162,7 +162,7 @@ async function main() {
   const storeFile = path.join(directory, "watchdog-tasks.json");
   const tasks = [
     fixture("wd_active"),
-    fixture("wd_receipt"),
+    fixture("wd_receipt", { remark: "收到前备注" }),
     fixture("wd_completed", { status: "completed", nextRunAt: "" }),
     fixture("wd_once", { mode: "once", dueAt: "2026-08-14T07:00:00.000Z" }),
     fixture("wd_initial")
@@ -283,14 +283,14 @@ async function main() {
     assert.equal(receivedUpdate.source.desc, "EA盯梢");
     assert.equal(receivedUpdate.source.desc_color, 1);
     assert.equal(receivedUpdate.main_title.title, "隔离回调测试任务-wd_receipt");
-    assert.equal(receivedUpdate.main_title.desc, "");
+    assert.equal(receivedUpdate.main_title.desc, "备注：收到前备注");
     assert.equal(receivedUpdate.card_action.type, 1);
     assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.equal(receivedUpdate.button_list, undefined);
     assert.equal(receivedUpdate.task_id, "ea_watch_wd_receipt_21");
     assert.equal(receivedUpdate.horizontal_content_list.some((item) => item.keyname === "详情"), false);
     assert.equal(receivedUpdate.jump_list.length, 1);
-    assert.equal(receivedUpdate.jump_list[0].title, "详情");
+    assert.equal(receivedUpdate.jump_list[0].title, "查看盯梢详情");
     assert.equal(receivedUpdate.jump_list[0].type, 1);
     assert.equal(receivedUpdate.jump_list[0].url, receivedUpdate.card_action.url);
 
@@ -381,7 +381,8 @@ async function main() {
         firstReminderSentAt: "2026-08-14T04:00:00.000Z",
         initialAckStatus: "received",
         initialAckAt: "2026-08-14T04:00:00.000Z",
-        appFeedbackToken: "legacy-feedback-token"
+        appFeedbackToken: "legacy-feedback-token",
+        remark: "优先确认联调内容"
       }), fixture("wd_linked_reminder_2", {
         nextRunAt: "2099-08-14T05:00:00.000Z",
         firstReminderSentAt: "2026-08-14T04:00:00.000Z",
@@ -446,7 +447,7 @@ async function main() {
     assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
     assert.equal(linkedCard.source.desc_color, 2);
     assert.equal(linkedCard.main_title.title, "隔离回调测试任务-wd_linked_reminder");
-    assert.equal(linkedCard.main_title.desc, "");
+    assert.equal(linkedCard.main_title.desc, "备注：优先确认联调内容");
     assert.equal(linkedCard.card_action.type, 1);
     assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.deepEqual(linkedCard.button_list, [
@@ -454,7 +455,7 @@ async function main() {
     ]);
     assert.equal(linkedCard.jump_list, undefined);
     const linkedDetail = linkedCard.horizontal_content_list.find((item) => item.keyname === "详情");
-    assert.equal(linkedDetail.value, "查看反馈记录");
+    assert.equal(linkedDetail.value, "查看盯梢详情");
     assert.equal(linkedDetail.type, 1);
     assert.equal(linkedDetail.url, linkedCard.card_action.url);
     assert.deepEqual(
