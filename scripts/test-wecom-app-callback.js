@@ -288,11 +288,11 @@ async function main() {
     assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.equal(receivedUpdate.button_list, undefined);
     assert.equal(receivedUpdate.task_id, "ea_watch_wd_receipt_21");
-    assert.equal(receivedUpdate.jump_list, undefined);
-    const receivedDetail = receivedUpdate.horizontal_content_list.find((item) => item.keyname === "详情");
-    assert.equal(receivedDetail.value, "查看反馈记录");
-    assert.equal(receivedDetail.type, 1);
-    assert.equal(receivedDetail.url, receivedUpdate.card_action.url);
+    assert.equal(receivedUpdate.horizontal_content_list.some((item) => item.keyname === "详情"), false);
+    assert.equal(receivedUpdate.jump_list.length, 1);
+    assert.equal(receivedUpdate.jump_list[0].title, "详情");
+    assert.equal(receivedUpdate.jump_list[0].type, 1);
+    assert.equal(receivedUpdate.jump_list[0].url, receivedUpdate.card_action.url);
 
     const duplicateReceipt = await sendEvent({ taskId: "ea_watch_wd_receipt_21", eventKey: "ea_watch_card_received" });
     assert.equal(duplicateReceipt.statusCode, 200);
@@ -443,9 +443,9 @@ async function main() {
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
-    assert.equal(linkedCard.source.desc, "EA盯梢");
-    assert.equal(linkedCard.source.desc_color, 1);
-    assert.equal(linkedCard.main_title.title, "NEW · 隔离回调测试任务-wd_linked_reminder");
+    assert.equal(linkedCard.source.desc, "NEW · EA盯梢");
+    assert.equal(linkedCard.source.desc_color, 2);
+    assert.equal(linkedCard.main_title.title, "隔离回调测试任务-wd_linked_reminder");
     assert.equal(linkedCard.main_title.desc, "");
     assert.equal(linkedCard.card_action.type, 1);
     assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);

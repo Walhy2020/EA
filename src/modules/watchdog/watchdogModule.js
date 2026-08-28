@@ -2691,11 +2691,11 @@ function createWatchdogModule(options = {}) {
     const card = {
       card_type: received ? "text_notice" : "button_interaction",
       source: {
-        desc: received ? "EA盯梢 · 已收到" : "EA盯梢",
-        desc_color: received ? 3 : 1
+        desc: received ? "EA盯梢 · 已收到" : "NEW · EA盯梢",
+        desc_color: received ? 3 : 2
       },
       main_title: {
-        title: truncate(received ? task.content : `NEW · ${task.content}`, 60),
+        title: truncate(task.content, 60),
         desc: ""
       },
       card_action: feedbackUrl
@@ -2705,12 +2705,16 @@ function createWatchdogModule(options = {}) {
       task_id: cardTaskId
     };
     if (feedbackUrl) {
-      card.horizontal_content_list.push({
-        keyname: "详情",
-        value: "查看反馈记录",
-        type: 1,
-        url: feedbackUrl
-      });
+      if (received) {
+        card.jump_list = [{ title: "详情", type: 1, url: feedbackUrl }];
+      } else {
+        card.horizontal_content_list.push({
+          keyname: "详情",
+          value: "查看反馈记录",
+          type: 1,
+          url: feedbackUrl
+        });
+      }
     }
     if (!received) {
       card.button_list = [{ text: "收到", key: "ea_watch_card_received", style: 1 }];
