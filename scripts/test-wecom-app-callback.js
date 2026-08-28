@@ -326,7 +326,7 @@ async function main() {
     assert.equal(receivedTask.appCardReceiptEvents[0].cardTaskId, "ea_watch_wd_receipt_21");
     assert.equal(receivedTask.appCardReceiptEvents[0].eventKey, "ea_watch_card_received");
     const receivedUpdate = cardUpdates.at(-1).templateCard;
-    assert.equal(receivedUpdate.card_type, "text_notice");
+    assert.equal(receivedUpdate.card_type, "button_interaction");
     assert.equal(receivedUpdate.source.desc, "EA盯梢");
     assert.equal(receivedUpdate.source.desc_color, 1);
     assert.equal(receivedUpdate.main_title.title, "隔离回调测试任务-wd_receipt");
@@ -334,13 +334,20 @@ async function main() {
     assert.equal(receivedUpdate.sub_title_text, "备注：收到前备注");
     assert.equal(receivedUpdate.card_action.type, 1);
     assert.match(receivedUpdate.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
-    assert.equal(receivedUpdate.button_list, undefined);
+    assert.deepEqual(receivedUpdate.button_list, [
+      { text: "收到", key: "ea_watch_card_received", style: 1 },
+      { text: "已完成", key: "ea_watch_done", style: 1 },
+      { text: "正常推进", key: "ea_watch_progress", style: 1 },
+      { text: "遇到困难", key: "ea_watch_blocked", style: 2 },
+      { text: "需要延期", key: "ea_watch_delay", style: 3 },
+      { text: "拒绝盯梢", key: "ea_watch_reject", style: 2 }
+    ]);
     assert.equal(receivedUpdate.task_id, "ea_watch_wd_receipt_21");
-    assert.equal(receivedUpdate.horizontal_content_list.some((item) => item.keyname === "详情"), false);
-    assert.equal(receivedUpdate.jump_list.length, 1);
-    assert.equal(receivedUpdate.jump_list[0].title, "查看盯梢详情");
-    assert.equal(receivedUpdate.jump_list[0].type, 1);
-    assert.equal(receivedUpdate.jump_list[0].url, receivedUpdate.card_action.url);
+    const receivedDetail = receivedUpdate.horizontal_content_list.find((item) => item.keyname === "详情");
+    assert.equal(receivedDetail.value, "查看盯梢详情");
+    assert.equal(receivedDetail.type, 1);
+    assert.equal(receivedDetail.url, receivedUpdate.card_action.url);
+    assert.equal(receivedUpdate.jump_list, undefined);
 
     const duplicateReceipt = await sendEvent({ taskId: "ea_watch_wd_receipt_21", eventKey: "ea_watch_card_received" });
     assert.equal(duplicateReceipt.statusCode, 200);
@@ -354,6 +361,33 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_initial").status, "active");
     assert.equal(taskById(storeFile, "wd_initial").initialAckEvents.length, 0);
     assert.equal(taskById(storeFile, "wd_initial").appCardReceiptEvents.length, 1);
+
+    const blockedWithoutNote = await sendEvent({
+      taskId: "ea_watch_wd_receipt_23",
+      eventKey: "ea_watch_blocked"
+    });
+    assert.equal(blockedWithoutNote.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_receipt").responses.length, 0);
+    const blockedWithoutNoteUpdate = cardUpdates.at(-1).templateCard;
+    assert.equal(blockedWithoutNoteUpdate.card_type, "button_interaction");
+    assert.equal(blockedWithoutNoteUpdate.source.desc, "EA盯梢");
+    assert.equal(blockedWithoutNoteUpdate.button_list.length, 6);
+    const requiredNoteLink = blockedWithoutNoteUpdate.horizontal_content_list.find((item) => item.keyname === "待填写");
+    assert.equal(requiredNoteLink.value, "遇到困难说明");
+    assert.equal(requiredNoteLink.type, 1);
+    assert.match(requiredNoteLink.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
+
+    const rejectedWithoutNote = await sendEvent({
+      taskId: "ea_watch_wd_receipt_24",
+      eventKey: "ea_watch_reject"
+    });
+    assert.equal(rejectedWithoutNote.statusCode, 200);
+    assert.equal(taskById(storeFile, "wd_receipt").status, "active");
+    assert.equal(taskById(storeFile, "wd_receipt").responses.length, 0);
+    assert.equal(
+      cardUpdates.at(-1).templateCard.horizontal_content_list.find((item) => item.keyname === "待填写").value,
+      "拒绝盯梢说明"
+    );
 
     const progress = await sendEvent({
       taskId: "ea_watch_wd_active_3",
@@ -386,7 +420,11 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_completed").responses.length, 0);
     assert.equal(taskById(storeFile, "wd_completed").status, "completed");
 
-    const once = await sendEvent({ taskId: "ea_watch_wd_once_5", eventKey: "ea_watch_delay" });
+    const once = await sendEvent({
+      taskId: "ea_watch_wd_once_5",
+      eventKey: "ea_watch_delay",
+      selectedItems: [{ questionKey: "ea_watch_situation", optionIds: ["waiting_integration"] }]
+    });
     assert.equal(once.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_once").awaitingRescheduleFrom, "assignee");
     assert.equal(robotMessageCount, 0);
@@ -508,7 +546,12 @@ async function main() {
     assert.equal(linkedCard.card_action.type, 1);
     assert.match(linkedCard.card_action.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
     assert.deepEqual(linkedCard.button_list, [
-      { text: "收到", key: "ea_watch_card_received", style: 1 }
+      { text: "收到", key: "ea_watch_card_received", style: 1 },
+      { text: "已完成", key: "ea_watch_done", style: 1 },
+      { text: "正常推进", key: "ea_watch_progress", style: 1 },
+      { text: "遇到困难", key: "ea_watch_blocked", style: 2 },
+      { text: "需要延期", key: "ea_watch_delay", style: 3 },
+      { text: "拒绝盯梢", key: "ea_watch_reject", style: 2 }
     ]);
     assert.equal(linkedCard.jump_list, undefined);
     const linkedDetail = linkedCard.horizontal_content_list.find((item) => item.keyname === "详情");
@@ -562,6 +605,7 @@ async function main() {
     assert.ok(feedbackPageHtml.indexOf('id="requesterName"') < feedbackPageHtml.indexOf('id="assigneeName"'));
     assert.ok(feedbackPageHtml.indexOf('id="assigneeName"') < feedbackPageHtml.indexOf('id="scheduleText"'));
     assert.ok(feedbackPageHtml.indexOf('id="scheduleText"') < feedbackPageHtml.indexOf('id="taskId"'));
+    assert.ok(feedbackPageHtml.indexOf('id="actionGrid"') < feedbackPageHtml.indexOf('id="feedbackHistoryBlock"'));
 
     const signedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       ref: feedbackCardUrl.searchParams.get("ref"),

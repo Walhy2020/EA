@@ -33,6 +33,11 @@ const APP_FEEDBACK_ACTION_LABELS = Object.freeze({
   delay: "需要延期",
   reject: "拒绝盯梢"
 });
+const APP_NATIVE_NOTE_REQUIRED_EVENTS = Object.freeze({
+  ea_watch_blocked: "遇到困难",
+  ea_watch_delay: "需要延期",
+  ea_watch_reject: "拒绝盯梢"
+});
 const APP_FEEDBACK_OAUTH_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
@@ -2683,9 +2688,21 @@ function createWatchdogModule(options = {}) {
     return `${prefix}${task.id}_${Date.now()}`;
   }
 
+  function appNativeReminderButtons() {
+    return [
+      { text: "收到", key: "ea_watch_card_received", style: 1 },
+      { text: "已完成", key: "ea_watch_done", style: 1 },
+      { text: "正常推进", key: "ea_watch_progress", style: 1 },
+      { text: "遇到困难", key: "ea_watch_blocked", style: 2 },
+      { text: "需要延期", key: "ea_watch_delay", style: 3 },
+      { text: "拒绝盯梢", key: "ea_watch_reject", style: 2 }
+    ];
+  }
+
   function appNativeReminderCard(task, tipType, options = {}) {
     const feedbackUrl = appFeedbackUrlForTask(task);
     const received = Boolean(options.received);
+    const noteRequiredLabel = normalizeText(options.noteRequiredLabel);
     const cardTaskId = normalizeText(options.cardTaskId) || appNativeCardTaskId(task, tipType);
     const remark = taskRemarkText(task);
     const contents = [
@@ -2694,7 +2711,7 @@ function createWatchdogModule(options = {}) {
       watchdogTaskIdCardItem(task)
     ];
     const card = {
-      card_type: received ? "text_notice" : "button_interaction",
+      card_type: "button_interaction",
       source: {
         desc: received ? "EA盯梢" : "NEW · EA盯梢",
         desc_color: received ? 1 : 2
@@ -2711,20 +2728,22 @@ function createWatchdogModule(options = {}) {
       task_id: cardTaskId
     };
     if (feedbackUrl) {
-      if (received) {
-        card.jump_list = [{ title: "查看盯梢详情", type: 1, url: feedbackUrl }];
-      } else {
+      if (noteRequiredLabel) {
         card.horizontal_content_list.push({
-          keyname: "详情",
-          value: "查看盯梢详情",
+          keyname: "待填写",
+          value: `${noteRequiredLabel}说明`,
           type: 1,
           url: feedbackUrl
         });
       }
+      card.horizontal_content_list.push({
+        keyname: "详情",
+        value: "查看盯梢详情",
+        type: 1,
+        url: feedbackUrl
+      });
     }
-    if (!received) {
-      card.button_list = [{ text: "收到", key: "ea_watch_card_received", style: 1 }];
-    }
+    card.button_list = appNativeReminderButtons();
     return card;
   }
 
@@ -5684,6 +5703,35 @@ function createWatchdogModule(options = {}) {
         task,
         updateCard: terminalNotice
       };
+    }
+
+    const noteRequiredLabel = APP_NATIVE_NOTE_REQUIRED_EVENTS[summary.eventKey] || "";
+    if (noteRequiredLabel) {
+      const situation = appSituationFromSelectedItems(summary.selectedItems);
+      const feedbackNote = normalizeText(summary.feedbackNote || situation.note);
+      if (!feedbackNote) {
+        if (logger && typeof logger.info === "function") {
+          logger.info("Watchdog native card feedback deferred for required note", {
+            taskId: task.id,
+            eventKey: summary.eventKey,
+            actionLabel: noteRequiredLabel,
+            senderConfigured: Boolean(sender && sender.userId)
+          });
+        }
+        return {
+          handled: true,
+          task,
+          updateCard: appNativeReminderCard(
+            task,
+            appReminderTipTypeFromCard(task, summary.taskId),
+            {
+              received: true,
+              cardTaskId: summary.taskId,
+              noteRequiredLabel
+            }
+          )
+        };
+      }
     }
 
     if (![
