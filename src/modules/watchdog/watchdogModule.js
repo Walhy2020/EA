@@ -27,6 +27,12 @@ const DEFAULT_SEND_QUEUE_MAX_SENDS_PER_TICK = 1;
 const DEFAULT_SEND_QUEUE_BATCH_SUMMARY_COOLDOWN_MS = 30 * 60 * 1000;
 const APP_FEEDBACK_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const APP_FEEDBACK_NOTE_MAX_LENGTH = 500;
+const APP_FEEDBACK_NOTE_REQUIRED_ACTIONS = new Set(["blocked", "delay", "reject"]);
+const APP_FEEDBACK_ACTION_LABELS = Object.freeze({
+  blocked: "遇到困难",
+  delay: "需要延期",
+  reject: "拒绝盯梢"
+});
 const APP_FEEDBACK_OAUTH_STATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const APP_RESULT_NOTICE_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const MAX_APP_RESULT_NOTICES_PER_TICK = 10;
@@ -2012,15 +2018,11 @@ function createWatchdogModule(options = {}) {
       && !controlCardSkipReason(task));
   }
 
-  function controlCardSkipReason(task, nowMs = Date.now()) {
+  function controlCardSkipReason(task) {
     if (!task || task.status !== "active") {
       return `task_${normalizeText(task && task.status) || "missing"}`;
     }
-    if (!isOneTimeTask(task)) {
-      return "";
-    }
-    const dueAtMs = dateValueMs(task.dueAt || task.nextRunAt);
-    return dueAtMs && dueAtMs <= nowMs ? "one_time_due_reached" : "";
+    return "";
   }
 
   function markControlCardSkipped(task, reason) {
@@ -3534,6 +3536,22 @@ function createWatchdogModule(options = {}) {
 
     const action = normalizeText(input.action).toLowerCase();
     const note = normalizeText(input.note);
+    if (APP_FEEDBACK_NOTE_REQUIRED_ACTIONS.has(action) && !note) {
+      const actionLabel = APP_FEEDBACK_ACTION_LABELS[action] || "该操作";
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app feedback note rejected because it is required", {
+          taskId: task.id,
+          action,
+          actionLabel,
+          assigneeUserId: task.assigneeUserId || ""
+        });
+      }
+      return {
+        ok: false,
+        message: `选择“${actionLabel}”时，请填写当前情况说明。`,
+        task: appFeedbackTaskView(task)
+      };
+    }
     if (note.length > APP_FEEDBACK_NOTE_MAX_LENGTH) {
       if (logger && typeof logger.warn === "function") {
         logger.warn("Watchdog app feedback note rejected because it is too long", {
@@ -3565,13 +3583,6 @@ function createWatchdogModule(options = {}) {
     };
 
     if (action === "reject") {
-      if (!note) {
-        return {
-          ok: false,
-          message: "请先填写拒绝原因。",
-          task: appFeedbackTaskView(task)
-        };
-      }
       await rejectWatchdogFromApp(task, sender, note);
     } else if (eventKeyByAction[action]) {
       const eventKey = eventKeyByAction[action];
@@ -3958,9 +3969,6 @@ function createWatchdogModule(options = {}) {
     }
     if (result && result.queued) {
       return "盯梢控制卡已加入发送队列，后台会自动重试；仍可用文字取消盯梢。";
-    }
-    if (result && result.skipped && result.reason === "one_time_due_reached") {
-      return "一次性任务已到提醒时间，不再发送取消卡片。";
     }
     if (result && result.skipped) {
       return "任务状态已变化，不再发送盯梢控制卡。";

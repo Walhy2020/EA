@@ -13,6 +13,12 @@
     task: null,
     submitting: false
   };
+  const noteRequiredActions = new Set(["blocked", "delay", "reject"]);
+  const actionLabels = {
+    blocked: "遇到困难",
+    delay: "需要延期",
+    reject: "拒绝盯梢"
+  };
   const elements = {
     loading: document.getElementById("loadingPanel"),
     error: document.getElementById("errorPanel"),
@@ -218,8 +224,8 @@
       return;
     }
     const note = elements.note.value.trim();
-    if (action === "reject" && !note) {
-      setMessage("拒绝盯梢前，请填写拒绝原因。", true);
+    if (noteRequiredActions.has(action) && !note) {
+      setMessage(`选择“${actionLabels[action] || "该操作"}”时，请填写当前情况说明。`, true);
       elements.note.focus();
       return;
     }

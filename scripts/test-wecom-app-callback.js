@@ -461,6 +461,12 @@ async function main() {
       }), fixture("wd_linked_completed", {
         status: "completed",
         nextRunAt: ""
+      }), fixture("wd_required_notes", {
+        nextRunAt: "2099-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        appFeedbackToken: "required-notes-token"
       })],
       drafts: []
     }, null, 2)}\n`, "utf8");
@@ -546,8 +552,10 @@ async function main() {
     assert.match(feedbackPageScript, /\/api\/dev-progress\/h5-session/);
     assert.match(feedbackPageScript, /\/demand-h5-auth\?returnTo=/);
     assert.match(feedbackPageScript, /renderFeedbackHistory/);
+    assert.match(feedbackPageScript, /new Set\(\["blocked", "delay", "reject"\]\)/);
     assert.match(feedbackPageHtml, /id="feedbackHistoryList"/);
     assert.match(feedbackPageHtml, /历史反馈记录/);
+    assert.match(feedbackPageHtml, /遇到困难、需要延期、拒绝盯梢时必填/);
     assert.doesNotMatch(feedbackPageHtml, /class="eyebrow"/);
     assert.doesNotMatch(feedbackPageHtml, /id="modeText"/);
     assert.ok(feedbackPageHtml.indexOf('id="remarkBlock"') < feedbackPageHtml.indexOf('class="task-details"'));
@@ -595,6 +603,41 @@ async function main() {
     });
     assert.equal(completedFeedback.ok, false);
     assert.match(completedFeedback.message, /不能重复反馈/);
+    for (const action of ["blocked", "delay", "reject"]) {
+      const missingNote = await linkedReminderWatchdog.submitAppFeedback({
+        taskId: "wd_required_notes",
+        token: "required-notes-token",
+        action,
+        note: ""
+      });
+      assert.equal(missingNote.ok, false);
+      assert.match(missingNote.message, /请填写当前情况说明/);
+    }
+    assert.equal(taskById(linkedReminderStoreFile, "wd_required_notes").responses.length, 0);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_required_notes").status, "active");
+
+    const blockedWithNote = await linkedReminderWatchdog.submitAppFeedback({
+      taskId: "wd_required_notes",
+      token: "required-notes-token",
+      action: "blocked",
+      note: "等待依赖资源"
+    });
+    assert.equal(blockedWithNote.ok, true);
+    const delayWithNote = await linkedReminderWatchdog.submitAppFeedback({
+      taskId: "wd_required_notes",
+      token: "required-notes-token",
+      action: "delay",
+      note: "预计明天完成"
+    });
+    assert.equal(delayWithNote.ok, true);
+    const rejectWithNote = await linkedReminderWatchdog.submitAppFeedback({
+      taskId: "wd_required_notes",
+      token: "required-notes-token",
+      action: "reject",
+      note: "任务归属不正确"
+    });
+    assert.equal(rejectWithNote.ok, true);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_required_notes").status, "rejected");
     const overlong = await linkedReminderWatchdog.submitAppFeedback({
       taskId: "wd_linked_reminder",
       token: "legacy-feedback-token",
@@ -623,9 +666,9 @@ async function main() {
       && /说明：联调完成，正在观察运行情况/.test(message.text)
     )));
 
-    const expiredControlStoreFile = path.join(directory, "expired-control-tasks.json");
-    fs.writeFileSync(expiredControlStoreFile, `${JSON.stringify({
-      tasks: [fixture("wd_expired_control", {
+    const overdueControlStoreFile = path.join(directory, "overdue-control-tasks.json");
+    fs.writeFileSync(overdueControlStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_overdue_control", {
         mode: "once",
         dueAt: "2026-08-14T04:00:00.000Z",
         nextRunAt: "",
@@ -635,22 +678,26 @@ async function main() {
       })],
       drafts: []
     }, null, 2)}\n`, "utf8");
-    let expiredControlCardSendCount = 0;
-    const expiredControlWatchdog = createWatchdogModule({
-      storeFile: expiredControlStoreFile,
+    let overdueControlCardSendCount = 0;
+    const overdueControlWatchdog = createWatchdogModule({
+      storeFile: overdueControlStoreFile,
       moduleConfig: { enabled: true, appPush: { enabled: false }, sendQueue: { minIntervalMs: 1 } },
       logger: { info() {}, warn() {} }
     });
-    expiredControlWatchdog.setRobotServer({
+    overdueControlWatchdog.setRobotServer({
       sendTemplateCardMessage: async () => {
-        expiredControlCardSendCount += 1;
+        overdueControlCardSendCount += 1;
         return { errcode: 0 };
       }
     });
-    await expiredControlWatchdog.tick();
-    assert.equal(expiredControlCardSendCount, 0);
-    assert.equal(expiredControlWatchdog.getStatus().queuedControlCardCount, 0);
-    expiredControlWatchdog.stop();
+    await overdueControlWatchdog.tick();
+    const overdueControlTask = taskById(overdueControlStoreFile, "wd_overdue_control");
+    assert.equal(overdueControlCardSendCount, 1, "一次性盯梢到点后仍须向发起人补发控制卡");
+    assert.ok(overdueControlTask.controlCardSentAt);
+    assert.equal(overdueControlTask.controlCardRetryAt, "");
+    assert.equal(overdueControlTask.controlCardLastError, "");
+    assert.equal(overdueControlWatchdog.getStatus().queuedControlCardCount, 0);
+    overdueControlWatchdog.stop();
 
     const cancelResult = await watchdog.handle({
       route: {
