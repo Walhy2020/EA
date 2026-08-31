@@ -1,6 +1,6 @@
 {
   "name": "eazygame-integrated-assistant",
-  "version": "0.6.89",
+  "version": "0.6.90",
   "private": true,
   "description": "Unified WeCom smart robot entry and local admin console for EazyGame operations.",
   "main": "src/main.js",

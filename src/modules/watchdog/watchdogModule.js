@@ -3126,6 +3126,56 @@ function createWatchdogModule(options = {}) {
     ].filter(Boolean).join("\n");
   }
 
+  function appResultNoticeCard(task, label, note = "", responseAt = "") {
+    const assignee = task.assigneeName || task.assigneeUserId || "未知";
+    const feedbackUrl = appFeedbackUrlForTask(task);
+    const terminalStatus = task.status === "completed"
+      ? "已完成，盯梢已停止"
+      : task.status === "rejected"
+        ? "已拒绝，盯梢已停止"
+        : "";
+    const nextText = terminalStatus
+      || (task.awaitingRescheduleFrom
+        ? "等待补充下次盯梢时间"
+        : (task.nextRunAt ? formatLocalMinute(task.nextRunAt) : "待补充"));
+    const contents = [
+      {
+        keyname: "反馈时间",
+        value: formatLocalMinute(responseAt || new Date().toISOString())
+      },
+      {
+        keyname: terminalStatus ? "任务状态" : "下次盯梢",
+        value: nextText
+      },
+      watchdogTaskIdCardItem(task)
+    ].filter(Boolean);
+    if (feedbackUrl) {
+      contents.push({
+        keyname: "详情",
+        value: "查看历史反馈",
+        type: 1,
+        url: feedbackUrl
+      });
+    }
+    return {
+      card_type: "text_notice",
+      source: {
+        desc: "EA盯梢反馈",
+        desc_color: 0
+      },
+      main_title: {
+        title: `${assignee}：${label}`,
+        desc: truncate(task.content, 60)
+      },
+      ...(note ? { sub_title_text: truncate(`当前情况：${note}`, 160) } : {}),
+      horizontal_content_list: contents,
+      card_action: {
+        type: 1,
+        url: "https://work.weixin.qq.com"
+      }
+    };
+  }
+
   function latestAppResultResponse(task) {
     const responses = Array.isArray(task.responses) ? task.responses : [];
     return responses.slice().reverse().find((item) => (
@@ -3161,10 +3211,16 @@ function createWatchdogModule(options = {}) {
     }
     const note = normalizeText(options.note);
     const responseAt = options.responseAt || new Date().toISOString();
+    const useTemplateCard = appPushNativeCardReady();
     try {
       const result = await appNotifier.send({
         targetUserId: requesterUserId,
-        text: appResultNoticeText(task, label, note),
+        ...(useTemplateCard
+          ? {
+            messageType: "template_card",
+            templateCard: appResultNoticeCard(task, label, note, responseAt)
+          }
+          : { text: appResultNoticeText(task, label, note) }),
         purpose: "watchdog_result_notice"
       });
       if (!result || !result.ok) {
@@ -3186,7 +3242,7 @@ function createWatchdogModule(options = {}) {
           taskId: task.id,
           requesterUserId,
           label,
-          messageType: "text",
+          messageType: useTemplateCard ? "template_card" : "text",
           responseAt,
           msgid: result.msgid || ""
         });
@@ -3346,7 +3402,7 @@ function createWatchdogModule(options = {}) {
       .map(({ sequence, ...record }) => record);
   }
 
-  function appFeedbackTaskView(task) {
+  function appFeedbackTaskView(task, viewerRole = "assignee") {
     const feedbackHistory = appFeedbackHistory(task);
     const latestFeedback = feedbackHistory[0] || null;
     if (latestFeedback && !latestFeedback.note && task.lastFeedbackNote) {
@@ -3356,7 +3412,8 @@ function createWatchdogModule(options = {}) {
       id: task.id,
       status: task.status || "",
       statusText: appFeedbackStatusText(task),
-      canFeedback: task.status === "active" && !task.awaitingRescheduleFrom,
+      viewerRole,
+      canFeedback: viewerRole === "assignee" && task.status === "active" && !task.awaitingRescheduleFrom,
       content: task.content || "",
       remark: taskRemarkText(task),
       attachment: task.attachment || "",
@@ -3426,15 +3483,19 @@ function createWatchdogModule(options = {}) {
       }
       return { ok: false, statusCode: 400, message: "反馈链接已失效或无权访问" };
     }
+    let viewerRole = "assignee";
     if (!legacyAccess) {
       const identityUserId = normalizeText(input.assigneeUserId);
-      if (!identityUserId || identityUserId !== normalizeText(task.assigneeUserId)) {
+      const assigneeMatched = Boolean(identityUserId && identityUserId === normalizeText(task.assigneeUserId));
+      const requesterMatched = Boolean(identityUserId && identityUserId === normalizeText(task.requesterUserId));
+      if (!assigneeMatched && !requesterMatched) {
         if (logger && typeof logger.warn === "function") {
           logger.warn("Watchdog app feedback signed identity denied", {
             accessMode: "signed_identity",
             taskId: task.id,
             feedbackRef,
             assigneeUserId: task.assigneeUserId || "",
+            requesterUserId: task.requesterUserId || "",
             identityUserId
           });
         }
@@ -3445,8 +3506,14 @@ function createWatchdogModule(options = {}) {
           message: "这条盯梢不属于当前登录用户，不能查看或反馈"
         };
       }
+      viewerRole = assigneeMatched ? "assignee" : "requester";
     }
-    return { ok: true, task, accessMode: legacyAccess ? "legacy_token" : "signed_identity" };
+    return {
+      ok: true,
+      task,
+      viewerRole,
+      accessMode: legacyAccess ? "legacy_token" : "signed_identity"
+    };
   }
 
   function getAppFeedbackTask(input = {}) {
@@ -3456,7 +3523,7 @@ function createWatchdogModule(options = {}) {
     }
     return {
       ok: true,
-      task: appFeedbackTaskView(access.task)
+      task: appFeedbackTaskView(access.task, access.viewerRole)
     };
   }
 
@@ -3545,6 +3612,22 @@ function createWatchdogModule(options = {}) {
       return access;
     }
     const task = access.task;
+    if (access.viewerRole !== "assignee") {
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog app feedback submission rejected for requester", {
+          taskId: task.id,
+          requesterUserId: task.requesterUserId || "",
+          action: normalizeText(input.action).toLowerCase()
+        });
+      }
+      return {
+        ok: false,
+        statusCode: 403,
+        code: "watchdog_feedback_read_only",
+        message: "发起人只能查看反馈记录，不能代替被盯梢人提交反馈",
+        task: appFeedbackTaskView(task, "requester")
+      };
+    }
     if (task.status !== "active" || task.awaitingRescheduleFrom) {
       return {
         ok: false,

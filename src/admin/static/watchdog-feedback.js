@@ -33,6 +33,8 @@
     remark: document.getElementById("remarkText"),
     attachmentBlock: document.getElementById("attachmentBlock"),
     attachment: document.getElementById("attachmentText"),
+    actionGrid: document.getElementById("actionGrid"),
+    feedbackForm: document.getElementById("feedbackForm"),
     feedbackHistoryBlock: document.getElementById("feedbackHistoryBlock"),
     feedbackHistoryCount: document.getElementById("feedbackHistoryCount"),
     feedbackHistoryList: document.getElementById("feedbackHistoryList"),
@@ -108,7 +110,7 @@
     if (task.status === "completed") {
       return "is-done";
     }
-    return task.canFeedback ? "" : "is-ended";
+    return task.status === "active" ? "" : "is-ended";
   }
 
   function formatShanghaiMinute(value) {
@@ -182,9 +184,14 @@
     elements.remarkBlock.hidden = !task.remark;
     elements.attachment.textContent = task.attachment || "";
     elements.attachmentBlock.hidden = !task.attachment;
+    const requesterView = task.viewerRole === "requester";
+    elements.actionGrid.hidden = requesterView;
+    elements.feedbackForm.hidden = requesterView;
     renderFeedbackHistory(task.feedbackHistory, task.lastFeedback);
     setButtonsDisabled(state.submitting || !task.canFeedback);
-    if (!task.canFeedback) {
+    if (requesterView) {
+      setMessage("这是你发起的盯梢，当前页面仅用于查看反馈记录。");
+    } else if (!task.canFeedback) {
       setMessage(`这条盯梢${task.statusText}。`);
     }
   }

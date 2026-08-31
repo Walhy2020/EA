@@ -399,6 +399,25 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_active").responses[0].source, "wecom-app-native");
     assert.equal(taskById(storeFile, "wd_active").responses[0].note, "等待联调");
     assert.equal(taskById(storeFile, "wd_active").lastFeedbackNote, "等待联调");
+    const progressResultMessage = callbackAppMessages.find((message) => (
+      message.purpose === "watchdog_result_notice"
+      && message.templateCard
+      && message.templateCard.main_title.title === "责任同事：正常推进"
+    ));
+    assert.equal(progressResultMessage.messageType, "template_card");
+    assert.equal(progressResultMessage.text, undefined);
+    assert.equal(progressResultMessage.templateCard.card_type, "text_notice");
+    assert.deepEqual(progressResultMessage.templateCard.source, { desc: "EA盯梢反馈", desc_color: 0 });
+    assert.equal(progressResultMessage.templateCard.main_title.desc, "隔离回调测试任务-wd_active");
+    assert.equal(progressResultMessage.templateCard.sub_title_text, "当前情况：等待联调");
+    assert.equal(progressResultMessage.templateCard.button_list, undefined);
+    assert.match(
+      progressResultMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "下次盯梢").value,
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
+    );
+    const progressHistoryLink = progressResultMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情");
+    assert.equal(progressHistoryLink.value, "查看历史反馈");
+    assert.match(progressHistoryLink.url, /^https:\/\/open\.weixin\.qq\.com\/connect\/oauth2\/authorize/);
 
     const duplicate = await sendEvent({ taskId: "ea_watch_wd_active_3", eventKey: "ea_watch_progress" });
     assert.equal(duplicate.statusCode, 200);
@@ -409,10 +428,12 @@ async function main() {
     assert.equal(taskById(storeFile, "wd_active").status, "completed");
     assert.ok(callbackAppMessages.some((message) => (
       message.purpose === "watchdog_result_notice"
-      && message.messageType === undefined
-      && message.templateCard === undefined
-      && message.text.includes("【EA盯梢已完成】")
-      && message.text.includes("状态：已完成，盯梢已停止")
+      && message.messageType === "template_card"
+      && message.templateCard
+      && message.templateCard.main_title.title === "责任同事：已完成"
+      && message.templateCard.horizontal_content_list.some((item) => (
+        item.keyname === "任务状态" && item.value === "已完成，盯梢已停止"
+      ))
     )));
 
     const terminal = await sendEvent({ taskId: "ea_watch_wd_completed_4", eventKey: "ea_watch_progress" });
@@ -595,8 +616,10 @@ async function main() {
     assert.match(feedbackPageScript, /\/api\/dev-progress\/h5-session/);
     assert.match(feedbackPageScript, /\/demand-h5-auth\?returnTo=/);
     assert.match(feedbackPageScript, /renderFeedbackHistory/);
+    assert.match(feedbackPageScript, /task\.viewerRole === "requester"/);
     assert.match(feedbackPageScript, /new Set\(\["blocked", "delay", "reject"\]\)/);
     assert.match(feedbackPageHtml, /id="feedbackHistoryList"/);
+    assert.match(feedbackPageHtml, /id="feedbackForm"/);
     assert.match(feedbackPageHtml, /历史反馈记录/);
     assert.match(feedbackPageHtml, /遇到困难、需要延期、拒绝盯梢时必填/);
     assert.doesNotMatch(feedbackPageHtml, /class="eyebrow"/);
@@ -613,6 +636,25 @@ async function main() {
     });
     assert.equal(signedFeedbackView.ok, true);
     assert.equal(signedFeedbackView.task.id, "wd_linked_reminder");
+    assert.equal(signedFeedbackView.task.viewerRole, "assignee");
+    assert.equal(signedFeedbackView.task.canFeedback, true);
+    const requesterFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
+      ref: feedbackCardUrl.searchParams.get("ref"),
+      assigneeUserId: "requester"
+    });
+    assert.equal(requesterFeedbackView.ok, true);
+    assert.equal(requesterFeedbackView.task.viewerRole, "requester");
+    assert.equal(requesterFeedbackView.task.canFeedback, false);
+    assert.equal(requesterFeedbackView.task.feedbackHistory.length, signedFeedbackView.task.feedbackHistory.length);
+    const requesterSubmission = await linkedReminderWatchdog.submitAppFeedback({
+      ref: feedbackCardUrl.searchParams.get("ref"),
+      assigneeUserId: "requester",
+      action: "progress",
+      note: "不应由发起人代填"
+    });
+    assert.equal(requesterSubmission.ok, false);
+    assert.equal(requesterSubmission.statusCode, 403);
+    assert.equal(requesterSubmission.code, "watchdog_feedback_read_only");
     const secondSignedFeedbackView = linkedReminderWatchdog.getAppFeedbackTask({
       ref: appFeedbackRefForTaskId("wd_linked_reminder_2"),
       assigneeUserId: "assignee"
@@ -707,8 +749,19 @@ async function main() {
     assert.equal(feedback.task.feedbackHistory[0].note, "联调完成，正在观察运行情况");
     assert.ok(linkedMessages.some((message) => (
       message.purpose === "watchdog_result_notice"
-      && /说明：联调完成，正在观察运行情况/.test(message.text)
+      && message.messageType === "template_card"
+      && message.templateCard
+      && message.templateCard.main_title.title === "责任同事：正常推进"
+      && message.templateCard.sub_title_text === "当前情况：联调完成，正在观察运行情况"
     )));
+    for (const expectedTitle of ["责任同事：遇到困难", "责任同事：需要延期", "责任同事：拒绝盯梢"]) {
+      assert.ok(linkedMessages.some((message) => (
+        message.purpose === "watchdog_result_notice"
+        && message.messageType === "template_card"
+        && message.templateCard
+        && message.templateCard.main_title.title === expectedTitle
+      )), `缺少反馈卡：${expectedTitle}`);
+    }
 
     const overdueControlStoreFile = path.join(directory, "overdue-control-tasks.json");
     fs.writeFileSync(overdueControlStoreFile, `${JSON.stringify({
