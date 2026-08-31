@@ -12,7 +12,7 @@ const { createDevProgressMonitorBridge } = require("../src/monitors/devProgressM
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const devProgressConfig = require("../config/dev-progress.config.json");
+const { getDevProgressSettings } = require("../src/config/settingsStore");
 
 const OMITTED_FIELD = Symbol("omitted-field");
 
@@ -144,13 +144,15 @@ async function duplicateTitleCheck() {
 }
 
 function configuredRequiredFieldNames() {
-  const requiredRule = devProgressConfig.rules && devProgressConfig.rules.requiredFields
-    ? devProgressConfig.rules.requiredFields
-    : {};
+  const requiredRule = getDevProgressSettings().rules.requiredFields || {};
+  const fieldRules = Array.isArray(requiredRule.fieldRules) ? requiredRule.fieldRules : [];
   const items = Array.isArray(requiredRule.items) ? requiredRule.items : [];
-  return [...new Set(items.flatMap((item) => (
-    Array.isArray(item && item.requiredFields) ? item.requiredFields : []
-  )).map((fieldName) => String(fieldName || "").trim()).filter(Boolean))].sort((left, right) => (
+  return [...new Set([
+    ...fieldRules.map((item) => item && item.field),
+    ...items.flatMap((item) => (
+      Array.isArray(item && item.requiredFields) ? item.requiredFields : []
+    ))
+  ].map((fieldName) => String(fieldName || "").trim()).filter(Boolean))].sort((left, right) => (
     left.localeCompare(right, "zh-CN")
   ));
 }

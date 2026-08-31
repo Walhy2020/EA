@@ -517,10 +517,16 @@ function renderDevProgressSettings(devProgress) {
   $("devProgressRuleMissingOwnerInput").checked = Boolean(missingOwnerRule.enabled);
   $("devProgressRequiredOwnerRolesInput").value = listToText(missingOwnerRule.requiredRoles);
   $("devProgressRuleRequiredFieldsInput").checked = Boolean(requiredFieldsRule.enabled);
-  $("devProgressRequiredFieldsRulesInput").value = JSON.stringify({
-    cumulative: requiredFieldsRule.cumulative !== false,
-    items: Array.isArray(requiredFieldsRule.items) ? requiredFieldsRule.items : []
-  }, null, 2);
+  $("devProgressRequiredFieldsRulesInput").value = JSON.stringify(
+    requiredFieldsRule.ruleFile
+      ? { ruleFile: requiredFieldsRule.ruleFile }
+      : {
+        cumulative: requiredFieldsRule.cumulative !== false,
+        items: Array.isArray(requiredFieldsRule.items) ? requiredFieldsRule.items : []
+      },
+    null,
+    2
+  );
 
   $("devProgressConfigBadge").classList.toggle("error", !ready);
   $("devProgressConfigBadge").textContent = ready ? "可测试" : "未完整";

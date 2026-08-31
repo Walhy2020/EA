@@ -6,9 +6,11 @@ const USER_NAME_CACHE_MS = 12 * 60 * 60 * 1000;
 const ACCESS_TOKEN_SAFE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_PROBE_FIELD_NAMES = 500;
 const LOOKUP_RESOLVER_CACHE_MS = 15 * 60 * 1000;
+const WORKDAY_CALENDAR_MAX_RECORDS = 5000;
 const userNameCache = new Map();
 const accessTokenCache = new Map();
 const lookupResolverCache = new Map();
+const workdayCalendarCache = new Map();
 
 function requestJson(method, url, payload) {
   return new Promise((resolve, reject) => {
@@ -423,6 +425,27 @@ function requiredFieldTitles(settings) {
       }
     }
   }
+  for (const fieldRule of Array.isArray(rule.fieldRules) ? rule.fieldRules : []) {
+    titles.push(fieldRule.field);
+    titles.push(...(Array.isArray(fieldRule.memberFields) ? fieldRule.memberFields : []));
+    if (fieldRule.when && fieldRule.when.field) {
+      titles.push(fieldRule.when.field);
+    }
+    for (const validation of Array.isArray(fieldRule.validations) ? fieldRule.validations : []) {
+      titles.push(validation.amountField);
+      if (validation.base && validation.base.field) {
+        titles.push(validation.base.field);
+      }
+      for (const deadline of Array.isArray(validation.deadlineFields) ? validation.deadlineFields : []) {
+        titles.push(typeof deadline === "string" ? deadline : deadline && deadline.field);
+      }
+    }
+  }
+  for (const leader of Object.values(rule.leaders && typeof rule.leaders === "object" ? rule.leaders : {})) {
+    if (leader && leader.sourceField) {
+      titles.push(leader.sourceField);
+    }
+  }
   return uniqueNonEmpty(titles);
 }
 
@@ -696,6 +719,159 @@ async function fetchRecordsByFieldIds(settings, accessToken, sheetId, fieldIds, 
     limit: Math.max(1, Math.min(Number(options.limit || 500), 500))
   });
   return data.errcode === 0 ? collectRecords(data) : [];
+}
+
+function calendarDateLabel(value) {
+  const text = String(value === null || value === undefined ? "" : value).trim();
+  if (!text) {
+    return "";
+  }
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const millis = numeric > 1000000000000 ? numeric : numeric * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+  }
+  const match = text.match(/(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+  return match
+    ? `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`
+    : "";
+}
+
+function smartsheetName(sheet = {}) {
+  return String(sheet.sheet_name || sheet.sheetName || sheet.name || sheet.title || "").trim();
+}
+
+function smartsheetId(sheet = {}) {
+  return String(sheet.sheet_id || sheet.sheetId || sheet.id || "").trim();
+}
+
+async function readDevProgressWorkdayCalendar(settings, options = {}) {
+  const requiredRule = settings.rules && settings.rules.requiredFields
+    ? settings.rules.requiredFields
+    : {};
+  const calendar = requiredRule.calendar || {};
+  const sheetName = String(options.sheetName || calendar.sheetName || "工作日").trim();
+  const dateField = String(options.dateField || calendar.dateField || "日期").trim();
+  const cacheMinutes = Math.max(1, Number(options.cacheMinutes || calendar.cacheMinutes || 15));
+  const cacheKey = [settings.docid || "", sheetName, dateField].join("|");
+  const cached = workdayCalendarCache.get(cacheKey);
+  if (!options.forceRefresh && cached && Date.now() - cached.cachedAt < cacheMinutes * 60 * 1000) {
+    return { ...cached.value, cacheHit: true };
+  }
+
+  const missing = missingDocumentInfoRequired(settings);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: "incomplete",
+      message: `缺少配置：${missing.join("、")}`,
+      dates: [],
+      cacheHit: false
+    };
+  }
+
+  const accessToken = await getAccessToken(settings);
+  const sheetsData = await postWeDoc("smartsheet/get_sheet", accessToken, { docid: settings.docid });
+  if (sheetsData.errcode !== 0) {
+    return {
+      ok: false,
+      status: "sheet_list_unavailable",
+      errcode: sheetsData.errcode,
+      errmsg: sheetsData.errmsg,
+      dates: [],
+      cacheHit: false
+    };
+  }
+  const targetSheet = (Array.isArray(sheetsData.sheet_list) ? sheetsData.sheet_list : [])
+    .find((sheet) => smartsheetName(sheet) === sheetName);
+  const sheetId = smartsheetId(targetSheet);
+  if (!sheetId) {
+    return {
+      ok: false,
+      status: "workday_sheet_not_found",
+      message: `未找到工作日子表：${sheetName}`,
+      sheetName,
+      dates: [],
+      cacheHit: false
+    };
+  }
+
+  const fieldsData = await postWeDoc("smartsheet/get_fields", accessToken, {
+    docid: settings.docid,
+    sheet_id: sheetId
+  });
+  const fieldDefinitions = fieldsData.errcode === 0 ? collectFieldDefinitions(fieldsData) : [];
+  if (!fieldDefinitions.some((field) => field.title === dateField)) {
+    return {
+      ok: false,
+      status: "workday_date_field_not_found",
+      message: `工作日子表缺少日期字段：${dateField}`,
+      sheetName,
+      sheetId,
+      dates: [],
+      cacheHit: false
+    };
+  }
+
+  const records = [];
+  let offset = 0;
+  while (records.length < WORKDAY_CALENDAR_MAX_RECORDS) {
+    const pageLimit = Math.min(500, WORKDAY_CALENDAR_MAX_RECORDS - records.length);
+    const data = await postWeDoc("smartsheet/get_records", accessToken, {
+      docid: settings.docid,
+      sheet_id: sheetId,
+      record_ids: [],
+      key_type: "CELL_VALUE_KEY_TYPE_FIELD_TITLE",
+      field_titles: [dateField],
+      field_ids: [],
+      sort: [],
+      offset,
+      limit: pageLimit
+    });
+    if (data.errcode !== 0) {
+      return {
+        ok: false,
+        status: "workday_records_unavailable",
+        errcode: data.errcode,
+        errmsg: data.errmsg,
+        sheetName,
+        sheetId,
+        dates: [],
+        cacheHit: false
+      };
+    }
+    const pageRecords = collectRecords(data);
+    records.push(...pageRecords);
+    if (pageRecords.length < pageLimit && !data.has_more) {
+      break;
+    }
+    offset += pageRecords.length;
+    if (pageRecords.length === 0) {
+      break;
+    }
+  }
+
+  const dates = uniqueNonEmpty(records.map((record) => calendarDateLabel(recordValues(record)[dateField])))
+    .sort();
+  const value = {
+    ok: dates.length > 0,
+    status: dates.length > 0 ? "ok" : "workday_dates_empty",
+    message: dates.length > 0 ? "" : "工作日子表没有可用日期",
+    sheetName,
+    sheetId,
+    dateField,
+    recordCount: records.length,
+    dateCount: dates.length,
+    firstDate: dates[0] || "",
+    lastDate: dates[dates.length - 1] || "",
+    dates,
+    cacheHit: false
+  };
+  if (value.ok) {
+    workdayCalendarCache.set(cacheKey, { cachedAt: Date.now(), value });
+  }
+  return value;
 }
 
 function lookupOwnerPairs(settings) {
@@ -1058,5 +1234,6 @@ module.exports = {
   previewDevProgressRecords,
   readDevProgressRecords,
   readDevProgressDocumentInfo,
+  readDevProgressWorkdayCalendar,
   testDevProgressConnection
 };

@@ -9,7 +9,8 @@ const {
 const {
   previewDevProgressRecords,
   readDevProgressDocumentInfo,
-  readDevProgressRecords
+  readDevProgressRecords,
+  readDevProgressWorkdayCalendar
 } = require("./wecomSmartsheetClient");
 const { inspectRequiredFields, scanDevProgressAnomalies } = require("./anomalyScanner");
 const {
@@ -25,7 +26,7 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
-const H5_MONITOR_CACHE_VERSION = 12;
+const H5_MONITOR_CACHE_VERSION = 13;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {
@@ -646,7 +647,36 @@ function expandRequiredFieldOwnerNames(ownerNames, roleLeaderNameMap) {
   return uniqueMerge(expanded);
 }
 
-function leaderRequiredFieldSetForPerson(personName, personAliases = {}, workflowRulesOverride) {
+function leaderRequiredFieldSetForPerson(personName, personAliases = {}, workflowRulesOverride, requiredRuleOverride) {
+  const requiredRule = requiredRuleOverride && typeof requiredRuleOverride === "object"
+    ? requiredRuleOverride
+    : {};
+  const fieldRules = Array.isArray(requiredRule.fieldRules) ? requiredRule.fieldRules : [];
+  if (fieldRules.length > 0) {
+    const leaders = requiredRule.leaders && typeof requiredRule.leaders === "object"
+      ? requiredRule.leaders
+      : {};
+    const isGlobalFallback = personNameMatches(
+      requiredRule.fallbackOwner,
+      personName,
+      personAliases
+    );
+    const result = new Set();
+    for (const fieldRule of fieldRules) {
+      const leader = leaders[String(fieldRule.leaderRole || "").trim()] || {};
+      const fixedLeaderNames = uniqueMerge(Array.isArray(leader.names) ? leader.names : []);
+      const fixedLeaderMatches = fixedLeaderNames.some((leaderName) => personNameMatches(
+        leaderName,
+        personName,
+        personAliases
+      ));
+      if (isGlobalFallback || fixedLeaderMatches || String(leader.sourceField || "").trim()) {
+        result.add(String(fieldRule.field || "").trim());
+      }
+    }
+    result.delete("");
+    return result;
+  }
   const workflowRules = workflowRulesOverride || getDemandWorkflowRulesSettings().normalizedRules || {};
   const roles = workflowRules.roles && typeof workflowRules.roles === "object" ? workflowRules.roles : {};
   const result = new Set();
@@ -799,13 +829,16 @@ function requiredFieldItemForFallbackScope(item = {}, allowedFieldSet) {
 
 function requiredFieldLeaderViewItems(cache = {}, settings = {}, leaderName = "", projectFilter, workflowRulesOverride) {
   const sourceItems = Array.isArray(cache.requiredItems) ? cache.requiredItems : [];
+  const usesFieldRules = Array.isArray(settings.rules?.requiredFields?.fieldRules)
+    && settings.rules.requiredFields.fieldRules.length > 0;
   const allowedFieldSet = leaderRequiredFieldSetForPerson(
     leaderName,
     settings.personAliases || {},
-    workflowRulesOverride
+    workflowRulesOverride,
+    settings.rules && settings.rules.requiredFields
   );
   return sourceItems
-    .filter((item) => !requiredFieldItemIsFallback(item))
+    .filter((item) => usesFieldRules || !requiredFieldItemIsFallback(item))
     .filter((item) => personNameMatches(item.ownerName, leaderName, settings.personAliases || {}))
     .filter((item) => projectMatchesFilter(item.project, projectFilter))
     .map((item) => requiredFieldItemForLeaderScope(item, allowedFieldSet))
@@ -2143,22 +2176,72 @@ function createDevProgressModule(options = {}) {
       };
     }
 
+    const calendarStartedAt = Date.now();
+    let workdayCalendar = {
+      ok: false,
+      status: "not_required",
+      dates: [],
+      dateCount: 0,
+      cacheHit: false
+    };
+    const requiredRule = rules.requiredFields || {};
+    const usesWorkdayCalendar = Array.isArray(requiredRule.fieldRules) && requiredRule.fieldRules.some((fieldRule) => (
+      Array.isArray(fieldRule.validations)
+      && fieldRule.validations.some((validation) => validation.type === "workdayNotAfter")
+    ));
+    if (usesWorkdayCalendar) {
+      try {
+        workdayCalendar = await readDevProgressWorkdayCalendar(settings);
+      } catch (error) {
+        workdayCalendar = {
+          ok: false,
+          status: "workday_calendar_error",
+          message: error && error.message ? error.message : String(error || ""),
+          dates: [],
+          dateCount: 0,
+          cacheHit: false
+        };
+      }
+    }
+    const calendarMs = Date.now() - calendarStartedAt;
+    if (usesWorkdayCalendar && !workdayCalendar.ok && logger && typeof logger.warn === "function") {
+      logger.warn("Dev progress workday calendar unavailable", {
+        status: workdayCalendar.status,
+        message: workdayCalendar.message || workdayCalendar.errmsg || "",
+        sheetName: requiredRule.calendar && requiredRule.calendar.sheetName || "工作日",
+        calendarMs
+      });
+    }
+
     const analyzeStartedAt = Date.now();
     const scanResult = scanDevProgressAnomalies(result.records, rules, {
-      focusDemandIds: scanOptions.focusDemandIds
+      focusDemandIds: scanOptions.focusDemandIds,
+      today: scanOptions.today,
+      workdayDates: workdayCalendar.dates || []
     });
     const analyzeMs = Date.now() - analyzeStartedAt;
     const perf = {
       totalMs: Date.now() - totalStartedAt,
       readMs,
+      calendarMs,
       analyzeMs,
-      read: result.perf || null
+      read: result.perf || null,
+      workdayCalendar: {
+        ok: Boolean(workdayCalendar.ok),
+        status: workdayCalendar.status || "",
+        dateCount: Number(workdayCalendar.dateCount || 0),
+        firstDate: workdayCalendar.firstDate || "",
+        lastDate: workdayCalendar.lastDate || "",
+        cacheHit: Boolean(workdayCalendar.cacheHit)
+      }
     };
     if (logger && typeof logger.info === "function") {
       logger.info("Dev progress anomaly scan perf", {
         limit: result.limit,
         scannedCount: scanResult.scannedCount,
         anomalyCount: scanResult.anomalyCount,
+        workdayCalendarStatus: workdayCalendar.status || "",
+        workdayDateCount: Number(workdayCalendar.dateCount || 0),
         perf
       });
     }
@@ -2456,6 +2539,8 @@ function createDevProgressModule(options = {}) {
       roleLeaderNameMap: roleLeaderNameMapFromWorkflowRules(workflowRules)
     });
     const targetOverride = requiredFieldTargetOverride(scanOptions);
+    const usesFieldRules = Array.isArray(settings.rules?.requiredFields?.fieldRules)
+      && settings.rules.requiredFields.fieldRules.length > 0;
     const targets = [];
     const unresolved = [];
     const responsibilityTargets = [];
@@ -2464,7 +2549,9 @@ function createDevProgressModule(options = {}) {
     for (const [ownerName, items] of grouped.groups.entries()) {
       const leaderRequiredFieldSet = leaderRequiredFieldSetForPerson(
         ownerName,
-        settings.personAliases || {}
+        settings.personAliases || {},
+        undefined,
+        settings.rules && settings.rules.requiredFields
       );
       const isFallbackOwner = personNameMatches(
         requiredFieldFallbackOwner(settings),
@@ -2473,7 +2560,9 @@ function createDevProgressModule(options = {}) {
       );
       const scopedItems = [];
       for (const item of items) {
-        if (!requiredFieldItemIsFallback(item)) {
+        if (usesFieldRules && !requiredFieldItemIsFallback(item)) {
+          mergeRequiredFieldItem(scopedItems, item);
+        } else if (usesFieldRules || !requiredFieldItemIsFallback(item)) {
           const leaderItem = requiredFieldItemForLeaderScope(item, leaderRequiredFieldSet);
           if (leaderItem) {
             mergeRequiredFieldItem(scopedItems, leaderItem);
@@ -2650,7 +2739,12 @@ function createDevProgressModule(options = {}) {
       .filter((item) => personNameMatches(item.ownerName, itemsOwnerName, settings.personAliases || {}))
       .filter((item) => projectMatchesFilter(item.project, projectFilter))
       .filter((item) => fallbackOnly ? true : !requiredFieldItemIsFallback(item));
-    const leaderRequiredFieldSet = leaderRequiredFieldSetForPerson(userName, settings.personAliases || {});
+    const leaderRequiredFieldSet = leaderRequiredFieldSetForPerson(
+      userName,
+      settings.personAliases || {},
+      undefined,
+      settings.rules && settings.rules.requiredFields
+    );
     const fallbackLeaderItems = fallbackOnly
       ? fallbackLeaderViewItems(cache, settings, projectFilter)
       : [];
@@ -2660,9 +2754,16 @@ function createDevProgressModule(options = {}) {
         .filter(Boolean)
         .map((item) => ({ ...item, leaderNames: [] }))
       : [];
+    const leaderItems = fallbackOnly
+      ? []
+      : requiredFieldLeaderViewItems(cache, settings, userName, projectFilter);
+    const directOwnerItems = fallbackOnly ? [] : ownerItems;
     const items = fallbackOnly
       ? [...fallbackLeaderItems, ...fallbackResidualItems]
-      : requiredFieldLeaderViewItems(cache, settings, userName, projectFilter);
+      : [...directOwnerItems, ...leaderItems].reduce((result, item) => {
+        mergeRequiredFieldItem(result, item);
+        return result;
+      }, []);
 
     if (logger && typeof logger.info === "function") {
       logger.info("Dev progress required-field access evaluated", {

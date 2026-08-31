@@ -20,6 +20,7 @@ docx_math_work/
 
 config/*.json
 !config/*.example.json
+!config/dev-progress-field-rules.json
 
 data/*
 !data/.gitkeep

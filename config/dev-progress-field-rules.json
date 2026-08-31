@@ -1,0 +1,709 @@
+{
+  "version": "2.0.0",
+  "source": "需求总表字段监控归类.xlsx",
+  "stageInclusive": true,
+  "statusSequence": [
+    "待分配",
+    "规划中",
+    "实现中",
+    "内网验收中",
+    "内网测试中",
+    "测试2验收中",
+    "测试2测试中",
+    "测试1验收/测试中",
+    "测试服全完成",
+    "已上线"
+  ],
+  "excludedDemandTypes": [
+    "任务拆分"
+  ],
+  "fallbackOwner": "王谦",
+  "calendar": {
+    "sheetName": "工作日",
+    "dateField": "日期",
+    "cacheMinutes": 15
+  },
+  "leaders": {
+    "动效组长": {
+      "names": [
+        "刘晓明"
+      ]
+    },
+    "策划组长": {
+      "names": [
+        "时振兴"
+      ]
+    },
+    "测试组长": {
+      "names": [
+        "高文盛"
+      ]
+    },
+    "UI组长": {
+      "names": [
+        "王谦"
+      ]
+    },
+    "前端组长": {
+      "sourceField": "前端组长"
+    },
+    "后端组长": {
+      "sourceField": "后端组长"
+    }
+  },
+  "fieldRules": [
+    {
+      "field": "需求类型",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "项目",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "需求名称",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "更新时间",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "需求内容",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "策划人员",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": []
+    },
+    {
+      "field": "规模类型",
+      "startStatus": "规划中",
+      "required": true,
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "UI人员",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "群聊",
+      "startStatus": "实现中",
+      "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置",
+        "活动配置",
+        "优化",
+        "配置bug"
+      ],
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "前端开发",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "前端组长",
+      "memberFields": [
+        "前端开发"
+      ]
+    },
+    {
+      "field": "后端开发",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "后端组长",
+      "memberFields": [
+        "后端开发"
+      ]
+    },
+    {
+      "field": "前端剩余",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "前端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "前端组长",
+      "memberFields": [
+        "前端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "后端剩余",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "后端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "后端组长",
+      "memberFields": [
+        "后端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "测试人员",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "测试组长",
+      "memberFields": []
+    },
+    {
+      "field": "UI需求",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "动效需求",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "动效人员",
+      "startStatus": "实现中",
+      "required": true,
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "策划人员"
+      ]
+    },
+    {
+      "field": "UI进度",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ]
+    },
+    {
+      "field": "动效进度",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ]
+    },
+    {
+      "field": "前端耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "前端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "前端组长",
+      "memberFields": [
+        "前端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "weekStart",
+            "field": "前端_周"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "后端耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "后端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "后端组长",
+      "memberFields": [
+        "后端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "weekStart",
+            "field": "后端_周"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "UI耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "field",
+            "field": "UI开始时间"
+          },
+          "deadlineFields": [
+            "美术截止日期",
+            "UI完成时间"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "UI日方时间",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "dateNotAfter",
+          "deadlineFields": [
+            "美术截止日期",
+            "UI完成时间"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "UI剩余时间",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "美术截止日期",
+            "UI完成时间"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "UI开始时间",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ]
+    },
+    {
+      "field": "UI完成时间",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "UI需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "dateNotAfter",
+          "deadlineFields": [
+            {
+              "field": "前端_周",
+              "transform": "weekStart"
+            },
+            "美术截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "前端_周",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "前端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "前端组长",
+      "memberFields": [
+        "前端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "amountField": "前端耗时",
+          "base": {
+            "type": "weekStart",
+            "field": "前端_周"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "后端_周",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "后端开发",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "后端组长",
+      "memberFields": [
+        "后端开发"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "amountField": "后端耗时",
+          "base": {
+            "type": "weekStart",
+            "field": "后端_周"
+          },
+          "deadlineFields": [
+            "开发截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "内网测试方式",
+      "startStatus": "实现中",
+      "required": true,
+      "excludedDemandTypes": [
+        "配置",
+        "活动配置",
+        "配置bug"
+      ],
+      "leaderRole": "测试组长",
+      "memberFields": [
+        "前端开发",
+        "后端开发"
+      ]
+    },
+    {
+      "field": "需求设计耗时",
+      "startStatus": "规划中",
+      "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug",
+        "配置",
+        "活动配置"
+      ],
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "需求截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "需求设计剩余",
+      "startStatus": "规划中",
+      "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug",
+        "配置"
+      ],
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "需求截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "配置/数值耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "配置截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "配置/数值剩余",
+      "startStatus": "实现中",
+      "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
+      "leaderRole": "策划组长",
+      "memberFields": [
+        "策划人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "配置截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "动效制作耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ]
+    },
+    {
+      "field": "动效制作剩余",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "动效制作交付日期",
+            "美术截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "动效制作交付日期",
+      "startStatus": "实现中",
+      "required": false,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ],
+      "validations": [
+        {
+          "type": "dateNotAfter",
+          "deadlineFields": [
+            "美术截止日期"
+          ]
+        }
+      ]
+    }
+  ]
+}

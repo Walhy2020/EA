@@ -494,18 +494,132 @@ function normalizeRequiredFieldFilters(value) {
     ));
 }
 
+function readProjectRuleFile(relativePath) {
+  const normalizedPath = String(relativePath || "").trim().replace(/\\/g, "/");
+  if (!normalizedPath || path.isAbsolute(normalizedPath)) {
+    throw new Error("需求监控规则文件必须使用项目内相对路径");
+  }
+  const resolvedPath = path.resolve(projectRoot, normalizedPath);
+  const relativeToProject = path.relative(projectRoot, resolvedPath);
+  if (!relativeToProject || relativeToProject.startsWith("..") || path.isAbsolute(relativeToProject)) {
+    throw new Error("需求监控规则文件必须位于 EA 项目目录内");
+  }
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`需求监控规则文件不存在：${normalizedPath}`);
+  }
+  return {
+    relativePath: normalizedPath,
+    value: readJson(resolvedPath)
+  };
+}
+
+function normalizeRuleCondition(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    field: String(input.field || "").trim(),
+    equals: normalizeRequiredFieldNames(input.equals),
+    notEquals: normalizeRequiredFieldNames(input.notEquals),
+    requireSourceValue: input.requireSourceValue !== false
+  };
+}
+
+function normalizeDeadlineField(value) {
+  if (typeof value === "string") {
+    return { field: value.trim(), transform: "" };
+  }
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    field: String(input.field || "").trim(),
+    transform: String(input.transform || "").trim()
+  };
+}
+
+function normalizeFieldValidation(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const base = input.base && typeof input.base === "object" && !Array.isArray(input.base)
+    ? input.base
+    : {};
+  return {
+    type: String(input.type || "").trim(),
+    amountField: String(input.amountField || "").trim(),
+    base: {
+      type: String(base.type || "").trim(),
+      field: String(base.field || "").trim()
+    },
+    deadlineFields: (Array.isArray(input.deadlineFields) ? input.deadlineFields : [])
+      .map(normalizeDeadlineField)
+      .filter((item) => item.field)
+  };
+}
+
+function normalizeFieldMonitorRules(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      const input = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+      return {
+        field: String(input.field || "").trim(),
+        startStatus: String(input.startStatus || "").trim(),
+        required: Boolean(input.required),
+        excludedDemandTypes: normalizeRequiredFieldNames(input.excludedDemandTypes),
+        when: normalizeRuleCondition(input.when),
+        leaderRole: String(input.leaderRole || "").trim(),
+        memberFields: normalizeRequiredFieldNames(input.memberFields),
+        validations: (Array.isArray(input.validations) ? input.validations : [])
+          .map(normalizeFieldValidation)
+          .filter((validation) => validation.type)
+      };
+    })
+    .filter((item) => item.field && item.startStatus);
+}
+
+function normalizeRuleLeaders(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(Object.entries(input)
+    .map(([roleName, roleValue]) => {
+      const role = roleValue && typeof roleValue === "object" && !Array.isArray(roleValue) ? roleValue : {};
+      return [String(roleName || "").trim(), {
+        names: normalizeRequiredFieldNames(role.names),
+        sourceField: String(role.sourceField || "").trim()
+      }];
+    })
+    .filter(([roleName]) => roleName));
+}
+
 function defaultRequiredFieldsRules() {
   return {
     enabled: false,
+    mode: "legacyMatrix",
+    ruleFile: "",
     cumulative: true,
     fallbackOwner: "王谦",
     fieldFilters: [],
-    items: []
+    items: [],
+    version: "",
+    source: "",
+    stageInclusive: true,
+    statusSequence: [],
+    excludedDemandTypes: [],
+    calendar: {
+      sheetName: "工作日",
+      dateField: "日期",
+      cacheMinutes: 15
+    },
+    leaders: {},
+    fieldRules: []
   };
 }
 
 function normalizeRequiredFieldsRules(input, baseRule = defaultRequiredFieldsRules()) {
-  const current = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const original = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const configuredRuleFile = String(original.ruleFile || baseRule.ruleFile || "").trim();
+  const loadedRuleFile = configuredRuleFile ? readProjectRuleFile(configuredRuleFile) : null;
+  const current = loadedRuleFile
+    ? {
+      ...loadedRuleFile.value,
+      enabled: original.enabled !== undefined ? Boolean(original.enabled) : Boolean(loadedRuleFile.value.enabled),
+      ruleFile: loadedRuleFile.relativePath
+    }
+    : original;
   const sourceItems = Array.isArray(input)
     ? input
     : (Array.isArray(current.items) ? current.items : []);
@@ -521,12 +635,30 @@ function normalizeRequiredFieldsRules(input, baseRule = defaultRequiredFieldsRul
     })
     .filter((item) => item.demandType && item.status && item.requiredFields.length > 0);
 
+  const calendar = current.calendar && typeof current.calendar === "object" && !Array.isArray(current.calendar)
+    ? current.calendar
+    : {};
+  const fieldRules = normalizeFieldMonitorRules(current.fieldRules);
   return {
     enabled: current.enabled !== undefined ? Boolean(current.enabled) : Boolean(baseRule.enabled),
+    mode: fieldRules.length > 0 ? "fieldRulesV2" : String(current.mode || baseRule.mode || "legacyMatrix").trim(),
+    ruleFile: configuredRuleFile,
     cumulative: current.cumulative !== undefined ? Boolean(current.cumulative) : baseRule.cumulative !== false,
     fallbackOwner: String(current.fallbackOwner || baseRule.fallbackOwner || "王谦").trim(),
     fieldFilters: normalizeRequiredFieldFilters(current.fieldFilters || baseRule.fieldFilters),
-    items
+    items,
+    version: String(current.version || "").trim(),
+    source: String(current.source || "").trim(),
+    stageInclusive: current.stageInclusive !== false,
+    statusSequence: normalizeRequiredFieldNames(current.statusSequence),
+    excludedDemandTypes: normalizeRequiredFieldNames(current.excludedDemandTypes),
+    calendar: {
+      sheetName: String(calendar.sheetName || "工作日").trim(),
+      dateField: String(calendar.dateField || "日期").trim(),
+      cacheMinutes: Math.max(1, Number(calendar.cacheMinutes || 15))
+    },
+    leaders: normalizeRuleLeaders(current.leaders),
+    fieldRules
   };
 }
 

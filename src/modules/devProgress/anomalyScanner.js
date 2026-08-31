@@ -329,8 +329,114 @@ function uniqueFieldEntries(entries) {
   return result;
 }
 
+function fieldRuleConditionMatches(record, condition = {}) {
+  const fieldName = normalizedText(condition.field);
+  if (!fieldName) {
+    return true;
+  }
+  const value = normalizedText(recordFieldValue(record, fieldName));
+  if (condition.requireSourceValue !== false && !value) {
+    return false;
+  }
+  const equals = normalizedArray(condition.equals || []);
+  if (equals.length > 0 && !equals.includes(value)) {
+    return false;
+  }
+  const notEquals = normalizedArray(condition.notEquals || []);
+  return !notEquals.includes(value);
+}
+
+function fieldRuleIsActive(record, fieldRule, requiredRule) {
+  const standard = record.standard || {};
+  const status = normalizedText(standard.status);
+  const demandType = normalizedText(standard.demandType);
+  const statusSequence = normalizedArray(requiredRule.statusSequence || []);
+  const statusIndex = statusSequence.indexOf(status);
+  const startIndex = statusSequence.indexOf(normalizedText(fieldRule.startStatus));
+  if (statusIndex < 0 || startIndex < 0) {
+    return false;
+  }
+  const globalExcluded = normalizedArray(requiredRule.excludedDemandTypes || []);
+  const ruleExcluded = normalizedArray(fieldRule.excludedDemandTypes || []);
+  if (globalExcluded.includes(demandType) || ruleExcluded.includes(demandType)) {
+    return false;
+  }
+  const stageMatches = requiredRule.stageInclusive === false
+    ? statusIndex > startIndex
+    : statusIndex >= startIndex;
+  return stageMatches && fieldRuleConditionMatches(record, fieldRule.when || {});
+}
+
+function fieldRuleLeaderNames(record, fieldRule, requiredRule) {
+  const leaders = requiredRule.leaders && typeof requiredRule.leaders === "object"
+    ? requiredRule.leaders
+    : {};
+  const leader = leaders[normalizedText(fieldRule.leaderRole)] || {};
+  return uniqueValues([
+    ...(Array.isArray(leader.names) ? leader.names : []),
+    ...splitPeople(leader.sourceField ? recordFieldValue(record, leader.sourceField) : "")
+  ]);
+}
+
+function requiredFieldEntriesFromFieldRules(record, requiredRule) {
+  const entries = [];
+  for (const fieldRule of Array.isArray(requiredRule.fieldRules) ? requiredRule.fieldRules : []) {
+    if (!fieldRuleIsActive(record, fieldRule, requiredRule)) {
+      continue;
+    }
+    const memberNames = uniqueValues((Array.isArray(fieldRule.memberFields) ? fieldRule.memberFields : [])
+      .flatMap((fieldName) => splitPeople(recordFieldValue(record, fieldName))));
+    const leaderNames = fieldRuleLeaderNames(record, fieldRule, requiredRule);
+    const fallbackNames = splitPeople(requiredRule.fallbackOwner);
+    if (memberNames.length > 0) {
+      entries.push({
+        fieldName: fieldRule.field,
+        owner: memberNames.join("、"),
+        ownerNames: memberNames,
+        ruleStatus: normalizedText(fieldRule.startStatus),
+        isFallbackOwner: false,
+        fieldRule
+      });
+    }
+    if (leaderNames.length > 0) {
+      entries.push({
+        fieldName: fieldRule.field,
+        owner: leaderNames.join("、"),
+        ownerNames: leaderNames,
+        ruleStatus: normalizedText(fieldRule.startStatus),
+        isFallbackOwner: true,
+        fieldRule
+      });
+    }
+    if (fallbackNames.length > 0) {
+      entries.push({
+        fieldName: fieldRule.field,
+        owner: fallbackNames.join("、"),
+        ownerNames: fallbackNames,
+        ruleStatus: normalizedText(fieldRule.startStatus),
+        isFallbackOwner: true,
+        fieldRule
+      });
+    }
+    if (memberNames.length === 0 && leaderNames.length === 0 && fallbackNames.length === 0) {
+      entries.push({
+        fieldName: fieldRule.field,
+        owner: "",
+        ownerNames: [],
+        ruleStatus: normalizedText(fieldRule.startStatus),
+        isFallbackOwner: true,
+        fieldRule
+      });
+    }
+  }
+  return uniqueFieldEntries(entries);
+}
+
 function requiredFieldEntriesForRecord(record, rule) {
   const requiredRule = rule || {};
+  if (requiredRule.mode === "fieldRulesV2" || (Array.isArray(requiredRule.fieldRules) && requiredRule.fieldRules.length > 0)) {
+    return requiredFieldEntriesFromFieldRules(record, requiredRule);
+  }
   const items = Array.isArray(requiredRule.items) ? requiredRule.items : [];
   const standard = record.standard || {};
   const demandType = normalizedText(standard.demandType);
@@ -374,25 +480,186 @@ function requiredFieldEntriesForRecord(record, rule) {
   return matchedStatus ? uniqueFieldEntries(accumulatedEntries) : [];
 }
 
-function inspectRequiredFields(record, rules) {
+function parseRequiredNumber(value) {
+  const text = normalizedText(value);
+  if (!text) {
+    return null;
+  }
+  const number = Number(text);
+  return Number.isFinite(number) ? number : Number.NaN;
+}
+
+function weekStart(date) {
+  const result = startOfLocalDay(date);
+  const day = result.getDay();
+  result.setDate(result.getDate() - (day === 0 ? 6 : day - 1));
+  return result;
+}
+
+function resolveValidationDate(record, value) {
+  const reference = typeof value === "string" ? { field: value } : (value || {});
+  const date = parseDateValue(recordFieldValue(record, reference.field));
+  if (!date) {
+    return null;
+  }
+  return reference.transform === "weekStart" ? weekStart(date) : date;
+}
+
+function resolveValidationBase(record, validation, today) {
+  const base = validation.base || {};
+  if (base.type === "today") {
+    return today;
+  }
+  const date = parseDateValue(recordFieldValue(record, base.field));
+  if (!date) {
+    return null;
+  }
+  return base.type === "weekStart" ? weekStart(date) : date;
+}
+
+function normalizedWorkdayLabels(values) {
+  return [...new Set((values || [])
+    .map((value) => dateLabel(parseDateValue(value)))
+    .filter(Boolean))]
+    .sort();
+}
+
+function addWorkdays(baseDate, amount, workdayLabels) {
+  const baseLabel = dateLabel(baseDate);
+  if (!baseLabel || !Number.isFinite(amount) || amount < 0 || workdayLabels.length === 0) {
+    return "";
+  }
+  if (amount === 0) {
+    return baseLabel;
+  }
+  const steps = Math.ceil(amount);
+  const exactIndex = workdayLabels.indexOf(baseLabel);
+  if (exactIndex >= 0) {
+    return workdayLabels[exactIndex + steps] || "";
+  }
+  const nextIndex = workdayLabels.findIndex((value) => value > baseLabel);
+  return nextIndex >= 0 ? (workdayLabels[nextIndex + steps - 1] || "") : "";
+}
+
+function validationProblem(fieldName, code, message, details = {}) {
+  return { fieldName, code, message, ...details };
+}
+
+function inspectFieldValidations(record, entry, options = {}) {
+  const fieldRule = entry.fieldRule || {};
+  const validations = Array.isArray(fieldRule.validations) ? fieldRule.validations : [];
+  const problems = [];
+  const skipped = [];
+  const today = options.today ? startOfLocalDay(options.today) : startOfLocalDay();
+  const workdayLabels = normalizedWorkdayLabels(options.workdayDates || []);
+
+  for (const validation of validations) {
+    const deadlineRefs = Array.isArray(validation.deadlineFields) ? validation.deadlineFields : [];
+    const deadlines = deadlineRefs
+      .map((reference) => ({ reference, date: resolveValidationDate(record, reference) }))
+      .filter((item) => item.date);
+    if (deadlines.length === 0) {
+      skipped.push({ code: "deadline_dependency_unavailable", fieldName: entry.fieldName });
+      continue;
+    }
+
+    let resultDate = null;
+    if (validation.type === "dateNotAfter") {
+      const rawValue = recordFieldValue(record, entry.fieldName);
+      if (isEmptyRequiredValue(rawValue)) {
+        continue;
+      }
+      resultDate = parseDateValue(rawValue);
+      if (!resultDate) {
+        problems.push(validationProblem(entry.fieldName, "invalid_date", `${entry.fieldName}不是有效日期`));
+        continue;
+      }
+    } else if (validation.type === "workdayNotAfter") {
+      const amountField = normalizedText(validation.amountField) || entry.fieldName;
+      const rawAmount = recordFieldValue(record, amountField);
+      if (isEmptyRequiredValue(rawAmount)) {
+        continue;
+      }
+      const amount = parseRequiredNumber(rawAmount);
+      if (!Number.isFinite(amount) || amount < 0) {
+        problems.push(validationProblem(entry.fieldName, "invalid_workday_amount", `${amountField}不是有效的非负工作日数`));
+        continue;
+      }
+      const baseDate = resolveValidationBase(record, validation, today);
+      if (!baseDate) {
+        skipped.push({ code: "base_date_dependency_unavailable", fieldName: entry.fieldName });
+        continue;
+      }
+      if (workdayLabels.length === 0) {
+        skipped.push({ code: "workday_calendar_unavailable", fieldName: entry.fieldName });
+        continue;
+      }
+      const resultLabel = addWorkdays(baseDate, amount, workdayLabels);
+      if (!resultLabel) {
+        skipped.push({ code: "workday_calendar_out_of_range", fieldName: entry.fieldName });
+        continue;
+      }
+      resultDate = parseDateValue(resultLabel);
+    } else {
+      skipped.push({ code: "unsupported_validation", fieldName: entry.fieldName, type: validation.type });
+      continue;
+    }
+
+    for (const deadline of deadlines) {
+      if (resultDate.getTime() <= deadline.date.getTime()) {
+        continue;
+      }
+      const deadlineField = typeof deadline.reference === "string"
+        ? deadline.reference
+        : deadline.reference.field;
+      problems.push(validationProblem(
+        entry.fieldName,
+        "date_after_deadline",
+        `${entry.fieldName}计算日期 ${dateLabel(resultDate)} 晚于 ${deadlineField} ${dateLabel(deadline.date)}`,
+        {
+          resultDate: dateLabel(resultDate),
+          deadlineField,
+          deadlineDate: dateLabel(deadline.date)
+        }
+      ));
+    }
+  }
+
+  return { problems, skipped };
+}
+
+function inspectRequiredFields(record, rules, options = {}) {
   const rule = rules && rules.requiredFields ? rules.requiredFields : {};
   if (!rule.enabled) {
     return [];
   }
 
   const requiredEntries = requiredFieldEntriesForRecord(record, rule);
-  const filteredEntries = applyRequiredFieldFilters(record, requiredEntries, rule);
+  const usesFieldRules = rule.mode === "fieldRulesV2" || (Array.isArray(rule.fieldRules) && rule.fieldRules.length > 0);
+  const filteredEntries = usesFieldRules
+    ? requiredEntries
+    : applyRequiredFieldFilters(record, requiredEntries, rule);
   return filteredEntries.map((entry) => {
     const value = recordFieldValue(record, entry.fieldName);
     const normalizedValue = normalizedText(value);
-    const missing = isEmptyRequiredValue(value);
+    const required = entry.fieldRule ? Boolean(entry.fieldRule.required) : true;
+    const problems = required && isEmptyRequiredValue(value)
+      ? [validationProblem(entry.fieldName, "empty_value", `${entry.fieldName}不得为空`)]
+      : [];
+    const validationResult = problems.length > 0
+      ? { problems: [], skipped: [] }
+      : inspectFieldValidations(record, entry, options);
+    problems.push(...validationResult.problems);
+    const missing = problems.length > 0;
     return {
       ...entry,
       rawValueType: rawFieldValueType(record, entry.fieldName, value),
       valueSource: fieldValueSource(record, entry.fieldName),
       normalizedValue,
       missing,
-      reason: missing ? "empty_value" : "explicit_value"
+      reason: missing ? problems[0].code : "explicit_value",
+      problems,
+      validationSkipped: validationResult.skipped
     };
   });
 }
@@ -541,8 +808,8 @@ function scanMissingOwner(record, rules, result) {
   }
 }
 
-function scanRequiredFields(record, rules, result) {
-  const missingEntries = inspectRequiredFields(record, rules).filter((entry) => entry.missing);
+function scanRequiredFields(record, rules, result, options = {}) {
+  const missingEntries = inspectRequiredFields(record, rules, options).filter((entry) => entry.missing);
   if (missingEntries.length === 0) {
     return;
   }
@@ -557,10 +824,12 @@ function scanRequiredFields(record, rules, result) {
         owner: entry.owner || "",
         ownerNames,
         missingFields: [],
+        fieldProblems: [],
         isFallbackOwner: Boolean(entry.isFallbackOwner)
       });
     }
     grouped.get(ownerKey).missingFields.push(entry.fieldName);
+    grouped.get(ownerKey).fieldProblems.push(...(Array.isArray(entry.problems) ? entry.problems : []));
     grouped.get(ownerKey).isFallbackOwner = grouped.get(ownerKey).isFallbackOwner || Boolean(entry.isFallbackOwner);
   }
 
@@ -569,13 +838,14 @@ function scanRequiredFields(record, rules, result) {
       type: "missing_required_field",
       severity: "medium",
       field: "requiredFields",
-      title: "监控字段缺失",
-      message: `${standard.demandType || "未识别需求类型"}/${standard.status || "未识别进度"} 缺少必填字段：${group.missingFields.join("、")}。`,
+      title: "监控字段异常",
+      message: `${standard.demandType || "未识别需求类型"}/${standard.status || "未识别进度"} 字段需要处理：${uniqueValues(group.fieldProblems.map((problem) => problem.message)).join("；")}。`,
       demandType: standard.demandType || "",
       status: standard.status || "",
       owner: group.owner || "",
       ownerNames: group.ownerNames,
       missingFields: group.missingFields,
+      fieldProblems: group.fieldProblems,
       isFallbackOwner: Boolean(group.isFallbackOwner)
     });
   }
@@ -645,7 +915,7 @@ function scanDevProgressAnomalies(records, rules, options = {}) {
     scanStale(record, rules, result, today);
     scanRemainingNearDeadline(record, rules, result, today);
     scanMissingOwner(record, rules, result);
-    scanRequiredFields(record, rules, result);
+    scanRequiredFields(record, rules, result, options);
   }
 
   const anomalies = [...result.values()]
@@ -671,9 +941,14 @@ function scanDevProgressAnomalies(records, rules, options = {}) {
       remainingNearDeadlineEnabled: Boolean(rules.remainingNearDeadline && rules.remainingNearDeadline.enabled),
       missingOwnerEnabled: Boolean(rules.missingOwner && rules.missingOwner.enabled),
       requiredFieldsEnabled: Boolean(rules.requiredFields && rules.requiredFields.enabled),
-      requiredFieldRuleCount: rules.requiredFields && Array.isArray(rules.requiredFields.items)
-        ? rules.requiredFields.items.length
-        : 0
+      requiredFieldRuleMode: rules.requiredFields && rules.requiredFields.mode || "legacyMatrix",
+      requiredFieldRuleVersion: rules.requiredFields && rules.requiredFields.version || "",
+      requiredFieldRuleCount: rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
+        && rules.requiredFields.fieldRules.length > 0
+        ? rules.requiredFields.fieldRules.length
+        : (rules.requiredFields && Array.isArray(rules.requiredFields.items)
+          ? rules.requiredFields.items.length
+          : 0)
     },
     anomalies
   };
