@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.1",
   "source": "需求总表字段监控归类.xlsx",
   "stageInclusive": true,
   "statusSequence": [
@@ -18,6 +18,10 @@
     "任务拆分"
   ],
   "fallbackOwner": "王谦",
+  "fallbackOwners": [
+    "王谦",
+    "李晶晶"
+  ],
   "calendar": {
     "sheetName": "工作日",
     "dateField": "日期",

@@ -592,6 +592,7 @@ function defaultRequiredFieldsRules() {
     ruleFile: "",
     cumulative: true,
     fallbackOwner: "王谦",
+    fallbackOwners: ["王谦"],
     fieldFilters: [],
     items: [],
     version: "",
@@ -639,12 +640,18 @@ function normalizeRequiredFieldsRules(input, baseRule = defaultRequiredFieldsRul
     ? current.calendar
     : {};
   const fieldRules = normalizeFieldMonitorRules(current.fieldRules);
+  const fallbackOwners = normalizeRequiredFieldNames(
+    current.fallbackOwners !== undefined
+      ? current.fallbackOwners
+      : (current.fallbackOwner || baseRule.fallbackOwners || baseRule.fallbackOwner || "王谦")
+  );
   return {
     enabled: current.enabled !== undefined ? Boolean(current.enabled) : Boolean(baseRule.enabled),
     mode: fieldRules.length > 0 ? "fieldRulesV2" : String(current.mode || baseRule.mode || "legacyMatrix").trim(),
     ruleFile: configuredRuleFile,
     cumulative: current.cumulative !== undefined ? Boolean(current.cumulative) : baseRule.cumulative !== false,
-    fallbackOwner: String(current.fallbackOwner || baseRule.fallbackOwner || "王谦").trim(),
+    fallbackOwner: fallbackOwners[0] || "王谦",
+    fallbackOwners,
     fieldFilters: normalizeRequiredFieldFilters(current.fieldFilters || baseRule.fieldFilters),
     items,
     version: String(current.version || "").trim(),

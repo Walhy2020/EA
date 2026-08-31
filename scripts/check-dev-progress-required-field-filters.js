@@ -10,6 +10,7 @@ assert.strictEqual(requiredFields.ruleFile, "config/dev-progress-field-rules.jso
 assert.deepStrictEqual(requiredFields.fieldFilters, []);
 assert.deepStrictEqual(requiredFields.items, []);
 assert.strictEqual(requiredFields.fallbackOwner, "王谦");
+assert.deepStrictEqual(requiredFields.fallbackOwners, ["王谦", "李晶晶"]);
 assert.ok(requiredFields.fieldRules.length > 0);
 
 const monitoredFields = new Set(requiredFields.fieldRules.map((item) => item.field));

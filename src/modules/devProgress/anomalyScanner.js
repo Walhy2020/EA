@@ -160,6 +160,13 @@ function splitPeople(value) {
   return uniqueValues(String(value || "").split(/[、,，/\\|;；\s]+/));
 }
 
+function requiredFieldFallbackOwnerNames(requiredRule = {}) {
+  return uniqueValues([
+    ...(Array.isArray(requiredRule.fallbackOwners) ? requiredRule.fallbackOwners : []),
+    ...splitPeople(requiredRule.fallbackOwner)
+  ]);
+}
+
 function isEmptyRequiredValue(value) {
   return normalizedText(value) === "";
 }
@@ -387,7 +394,7 @@ function requiredFieldEntriesFromFieldRules(record, requiredRule) {
     const memberNames = uniqueValues((Array.isArray(fieldRule.memberFields) ? fieldRule.memberFields : [])
       .flatMap((fieldName) => splitPeople(recordFieldValue(record, fieldName))));
     const leaderNames = fieldRuleLeaderNames(record, fieldRule, requiredRule);
-    const fallbackNames = splitPeople(requiredRule.fallbackOwner);
+    const fallbackNames = requiredFieldFallbackOwnerNames(requiredRule);
     if (memberNames.length > 0) {
       entries.push({
         fieldName: fieldRule.field,
@@ -408,11 +415,11 @@ function requiredFieldEntriesFromFieldRules(record, requiredRule) {
         fieldRule
       });
     }
-    if (fallbackNames.length > 0) {
+    for (const fallbackName of fallbackNames) {
       entries.push({
         fieldName: fieldRule.field,
-        owner: fallbackNames.join("、"),
-        ownerNames: fallbackNames,
+        owner: fallbackName,
+        ownerNames: [fallbackName],
         ruleStatus: normalizedText(fieldRule.startStatus),
         isFallbackOwner: true,
         fieldRule
@@ -442,7 +449,7 @@ function requiredFieldEntriesForRecord(record, rule) {
   const demandType = normalizedText(standard.demandType);
   const status = normalizedText(standard.status);
   const cumulative = requiredRule.cumulative !== false;
-  const fallbackOwner = normalizedText(requiredRule.fallbackOwner);
+  const fallbackOwner = requiredFieldFallbackOwnerNames(requiredRule).join("、");
 
   if (!demandType || !status) {
     return [];

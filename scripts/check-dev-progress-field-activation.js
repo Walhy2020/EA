@@ -13,6 +13,7 @@ const gatedFields = new Set(["需求名称", "群聊"]);
 
 assert.strictEqual(rules.requiredFields.mode, "fieldRulesV2");
 assert.strictEqual(rules.requiredFields.fallbackOwner, "王谦");
+assert.deepStrictEqual(rules.requiredFields.fallbackOwners, ["王谦", "李晶晶"]);
 
 function decisions(demandType, status, groupChat) {
   const result = inspectRequiredFields({

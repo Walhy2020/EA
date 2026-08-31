@@ -26,7 +26,7 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
-const H5_MONITOR_CACHE_VERSION = 13;
+const H5_MONITOR_CACHE_VERSION = 14;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {
@@ -656,11 +656,8 @@ function leaderRequiredFieldSetForPerson(personName, personAliases = {}, workflo
     const leaders = requiredRule.leaders && typeof requiredRule.leaders === "object"
       ? requiredRule.leaders
       : {};
-    const isGlobalFallback = personNameMatches(
-      requiredRule.fallbackOwner,
-      personName,
-      personAliases
-    );
+    const isGlobalFallback = requiredFieldFallbackOwners({ rules: { requiredFields: requiredRule } })
+      .some((fallbackOwner) => personNameMatches(fallbackOwner, personName, personAliases));
     const result = new Set();
     for (const fieldRule of fieldRules) {
       const leader = leaders[String(fieldRule.leaderRole || "").trim()] || {};
@@ -789,12 +786,20 @@ function requiredFieldItemIsFallback(item = {}) {
 }
 
 function requiredFieldFallbackOwner(settings = {}) {
-  return String(settings.rules?.requiredFields?.fallbackOwner || "王谦").trim();
+  return requiredFieldFallbackOwners(settings)[0] || "王谦";
+}
+
+function requiredFieldFallbackOwners(settings = {}) {
+  const requiredFields = settings.rules?.requiredFields || {};
+  return uniqueMerge([
+    ...(Array.isArray(requiredFields.fallbackOwners) ? requiredFields.fallbackOwners : []),
+    ...splitPeople(requiredFields.fallbackOwner || "王谦")
+  ]);
 }
 
 function requiredFieldFallbackViewerNames(settings = {}) {
   return uniqueMerge([
-    requiredFieldFallbackOwner(settings),
+    ...requiredFieldFallbackOwners(settings),
     ...REQUIRED_FIELD_FALLBACK_VIEWER_NAMES
   ]);
 }
@@ -2553,11 +2558,11 @@ function createDevProgressModule(options = {}) {
         undefined,
         settings.rules && settings.rules.requiredFields
       );
-      const isFallbackOwner = personNameMatches(
-        requiredFieldFallbackOwner(settings),
+      const isFallbackOwner = requiredFieldFallbackOwners(settings).some((fallbackOwner) => personNameMatches(
+        fallbackOwner,
         ownerName,
         settings.personAliases || {}
-      );
+      ));
       const scopedItems = [];
       for (const item of items) {
         if (usesFieldRules && !requiredFieldItemIsFallback(item)) {
