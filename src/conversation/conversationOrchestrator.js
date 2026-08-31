@@ -17,7 +17,7 @@ const VERSION_PROJECT_ALIASES = {
   "stb": "嗜血"
 };
 
-const CAPABILITY_REPLY = "我可以帮你查小游戏榜单和历史排名、查看开发进度（个人任务、版本计划）、打开需求协作入口、创建盯梢任务、创建新的文档、智能文档、表格或智能表格、查询历史反馈。你想做什么？";
+const CAPABILITY_REPLY = "我可以帮你查小游戏榜单和历史排名、查看开发进度（个人任务、版本计划）、打开需求协作入口、创建盯梢任务、创建 EA 可访问的文档或智能表格、查询历史反馈。你想做什么？";
 
 function stripJsonFence(text) {
   return String(text || "")
@@ -539,8 +539,11 @@ function looksLikeDocCreateQuestion(text) {
   if (/(?:如何|怎么|怎样).{0,8}(?:创建|新建|建立|生成|建)/.test(value)) {
     return true;
   }
-  if (/(?:区别|有什么区别|什么区别|在你看来|解释|说明)/.test(value)
+  if (/(?:区别|有什么区别|什么区别|在你看来|解释)/.test(value)
     && /(文档|表格|智能文档|智能表格)/.test(value)) {
+    return true;
+  }
+  if (/(?:说明|介绍).{0,8}(?:文档|表格|智能文档|智能表格)/.test(value)) {
     return true;
   }
   if (/(?:能创建什么|可以创建什么|支持创建什么|能建立什么|可以建立什么|支持建立什么)/.test(value)) {
@@ -552,16 +555,16 @@ function looksLikeDocCreateQuestion(text) {
 
 function docCreateKind(text) {
   const value = String(text || "").trim();
-  if (/智能表格/.test(value)) {
-    return "smartsheet";
-  }
-  if (/智能文档/.test(value)) {
-    return "smartdoc";
-  }
-  if (/(?:普通表格|在线表格|共享表格|表格|表)/.test(value)) {
+  if (/普通表格/.test(value)) {
     return "spreadsheet";
   }
-  return "document";
+  if (/(?:智能表格|在线表格|共享表格|表格|表)/.test(value)) {
+    return "smartsheet";
+  }
+  if (/普通文档/.test(value)) {
+    return "document";
+  }
+  return "smartdoc";
 }
 
 function docCreateAction(kind) {
@@ -850,7 +853,7 @@ function buildPlannerPrompt(input) {
     "- devProgress：开发进度智能表格。动作：person_task_count、people_task_summary、version_summary、demand_detail。用于回答某个人有几条任务、我有任务吗、哪些人有任务、当前/本月/某个月有几个版本、某项目什么版本、版本计划并导出版本任务 Excel，也可按更新时间查询需求名称、需求内容、状态并导出 Excel。",
     "- watchdog：盯梢系统。动作：create_watchdog、reschedule_watchdog、cancel_watchdog、list_watchdog、help_watchdog。用于定时找某个同事收集某条任务或内容的进度，直到对方反馈已完成；也支持盯梢备注、一次性定点提醒、补充下一次盯梢时间、发起人取消自己创建的进行中盯梢、查询当前运行中的盯梢数量和列表、回答盯梢用法。",
     "- bugCollection：EA 系统自身的需求和 Bug 收集智能表格。动作：collect_issue。仅用于收集同事对 EA 系统、机器人、管理台、开发进度监控、版本查询、需求监控等能力的问题、Bug、需求、建议，并写入共享智能表格；不要用于记录游戏业务需求或需求总表里的项目需求。",
-    "- docCreator：创建新的企业微信文档、智能文档、表格或智能表格。动作：create_document、create_smart_document、create_spreadsheet、create_smartsheet。普通“文档/在线文档/共享文档”用 create_document；明确说“智能文档”用 create_smart_document；普通“表格/在线表格/共享表格”用 create_spreadsheet；明确说“智能表格”才用 create_smartsheet；创建后把地址返回给同事。",
+    "- docCreator：创建 EA 应用有权访问的企业微信文档或智能表格。动作：create_document、create_smart_document、create_spreadsheet、create_smartsheet。泛称“文档/在线文档/共享文档”默认用 create_smart_document；只有明确说“普通文档”才用 create_document。泛称“表格/在线表格/共享表格”默认用 create_smartsheet；只有明确说“普通表格”才用 create_spreadsheet。创建后把地址返回给同事。",
     "- feedback：旧本地需求监控反馈文件。动作：feedback_summary、export_feedback。只用于查询或导出历史本地反馈；新的 EA 系统问题、Bug、需求、建议都用 bugCollection。",
     "- demand：旧需求进度占位模块。当前模块未接入，除非用户明确问旧需求进度，否则不要选择。",
     "- activity：活动情报。当前模块未接入，除非用户明确问活动，否则不要选择。",
@@ -895,10 +898,10 @@ function buildPlannerPrompt(input) {
     "- 循环盯梢默认 3 小时一次；如果同事明确说 30 分钟、1 小时、每天一次、每天 10:00、工作日 11:00、每周一 16:00 等，以同事说的时间为准。一次性盯梢以同事说的日期时间为准。",
     "- 同事自然反馈 EA 系统、机器人、管理台、开发进度监控、版本查询、需求监控等能力的问题、Bug、需求或建议，且不是在查询榜单/开发进度时，优先 module=bugCollection，action=collect_issue。",
     "- 如果同事只是描述游戏业务需求、项目需求、需求总表里的需求，不要选择 bugCollection；这类内容要么走 devProgress 查询，要么 status=need_clarification。",
-    "- 同事要求“创建一个文档/新建共享文档/帮我建一篇方案文档”等，信息足够，module=docCreator，action=create_document；如果能识别文档名称，params.docName=文档名称；不需要确认。",
-    "- 同事明确说“智能文档”时，module=docCreator，action=create_smart_document；不要把普通“文档”当成智能文档。",
-    "- 同事要求“创建一个表格/新建普通表格/创建在线表格/帮我建一张项目周报表”等，信息足够，module=docCreator，action=create_spreadsheet；如果能识别表格名称，params.docName=表格名称；不需要确认。",
-    "- 只有同事明确说“智能表格”时，module=docCreator，action=create_smartsheet；不要把普通“表格”当成智能表格。",
+    "- 同事要求“创建一个文档/新建共享文档/创建在线文档/帮我建一篇方案文档”等，信息足够，module=docCreator，action=create_smart_document；如果能识别文档名称，params.docName=文档名称；不需要确认。",
+    "- 只有同事明确说“普通文档”时，module=docCreator，action=create_document。",
+    "- 同事要求“创建一个表格/创建在线表格/新建共享表格/帮我建一张项目周报表”等，信息足够，module=docCreator，action=create_smartsheet；如果能识别表格名称，params.docName=表格名称；不需要确认。",
+    "- 只有同事明确说“普通表格”时，module=docCreator，action=create_spreadsheet。",
     "- 同事只是问“如何创建/有什么区别/能创建什么”时不要创建文档，status=chat 或 need_clarification。",
     "- bugCollection 的表格字段是：任务ID、类型、标题、描述、截图、提交人、创建时间、更新时间；任务ID 由系统自动生成，大模型不要填写。",
     "- 对 bugCollection：issueType 只能填“Bug”或“需求”；报错、异常、闪退、白屏、打不开、失败、不能正常使用归为 Bug；建议、优化、希望新增或流程诉求归为需求。",
