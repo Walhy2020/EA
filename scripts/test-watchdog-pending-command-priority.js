@@ -123,6 +123,27 @@ async function main() {
   const rescheduleCapture = await rescheduleWatchdog.capturePendingTextMessage({ sender: requester, text: formText });
   assert.equal(rescheduleCapture.handled, false, "一次性补时间等待中仍必须放行独立新建盯梢命令");
 
+  for (const docCommand of [
+    "创建文档",
+    "创建一个智能表格",
+    "创建一个智能表格，名称叫：需求总表字段监控归类"
+  ]) {
+    const docCapture = await rescheduleWatchdog.capturePendingTextMessage({
+      sender: requester,
+      text: docCommand
+    });
+    assert.equal(docCapture.handled, false, `等待补时间时必须放行文档创建命令：${docCommand}`);
+    assert.equal(taskById(rescheduleStoreFile, "wd_pending_reschedule").awaitingRescheduleFrom, requester.userId);
+  }
+
+  const validReschedule = await rescheduleWatchdog.capturePendingTextMessage({
+    sender: requester,
+    text: "每2小时一次"
+  });
+  assert.equal(validReschedule.handled, true, "真正的循环时间回复仍应由盯梢待补状态接收");
+  assert.equal(taskById(rescheduleStoreFile, "wd_pending_reschedule").mode, "recurring");
+  assert.equal(taskById(rescheduleStoreFile, "wd_pending_reschedule").awaitingRescheduleFrom, "");
+
   watchdog.stop();
   rescheduleWatchdog.stop();
   fs.rmSync(directory, { recursive: true, force: true });

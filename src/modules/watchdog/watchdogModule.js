@@ -732,9 +732,31 @@ function looksLikeDemandCollaborationEntryText(text) {
   return /^(?:打开|进入|访问|查看|发我|发一下|给我|我要|来个)?\s*(?:需求协作|需求待办|需求H5|需求h5|需求页面|需求入口)/.test(rawText);
 }
 
+function looksLikeDocCreatorCommandText(text) {
+  const rawText = String(text || "").trim();
+  if (!rawText) {
+    return false;
+  }
+  const docTypeWords = "(?:智能表格|智能文档|普通表格|在线表格|共享表格|普通文档|在线文档|共享文档|表格|文档|表)";
+  return new RegExp(`(?:创建|新建|建立|生成|建).{0,20}${docTypeWords}`).test(rawText)
+    || new RegExp(`${docTypeWords}.{0,20}(?:创建|新建|建立|生成|建)`).test(rawText);
+}
+
+function knownNonWatchdogCommandType(text) {
+  if (looksLikeDocCreatorCommandText(text)) {
+    return "doc_creator";
+  }
+  if (looksLikeVersionSummaryQueryText(text)) {
+    return "version_summary";
+  }
+  if (looksLikeDemandCollaborationEntryText(text)) {
+    return "demand_collaboration";
+  }
+  return "";
+}
+
 function looksLikeKnownNonWatchdogCommandText(text) {
-  return looksLikeVersionSummaryQueryText(text)
-    || looksLikeDemandCollaborationEntryText(text);
+  return Boolean(knownNonWatchdogCommandType(text));
 }
 
 function looksLikeRescheduleInstructionText(text) {
@@ -6245,6 +6267,7 @@ function createWatchdogModule(options = {}) {
           logger.info("Watchdog pending reschedule skipped for non-watchdog command", {
             taskId: rescheduleTask.id,
             senderUserId: sender.userId || "",
+            commandType: knownNonWatchdogCommandType(context.text),
             textLength: String(context.text || "").length
           });
         }
