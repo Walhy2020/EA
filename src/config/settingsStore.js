@@ -515,11 +515,16 @@ function readProjectRuleFile(relativePath) {
 
 function normalizeRuleCondition(value) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const nestedConditions = (conditions) => (Array.isArray(conditions) ? conditions : [])
+    .map(normalizeRuleCondition)
+    .filter((condition) => condition.field || condition.any.length > 0 || condition.all.length > 0);
   return {
     field: String(input.field || "").trim(),
     equals: normalizeRequiredFieldNames(input.equals),
     notEquals: normalizeRequiredFieldNames(input.notEquals),
-    requireSourceValue: input.requireSourceValue !== false
+    requireSourceValue: input.requireSourceValue !== false,
+    any: nestedConditions(input.any),
+    all: nestedConditions(input.all)
   };
 }
 
@@ -559,6 +564,7 @@ function normalizeFieldMonitorRules(value) {
       return {
         field: String(input.field || "").trim(),
         startStatus: String(input.startStatus || "").trim(),
+        endStatus: String(input.endStatus || "").trim(),
         required: Boolean(input.required),
         excludedDemandTypes: normalizeRequiredFieldNames(input.excludedDemandTypes),
         when: normalizeRuleCondition(input.when),

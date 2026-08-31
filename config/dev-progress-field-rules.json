@@ -1,5 +1,5 @@
 {
-  "version": "2.0.1",
+  "version": "2.1.0",
   "source": "需求总表字段监控归类.xlsx",
   "stageInclusive": true,
   "statusSequence": [
@@ -111,6 +111,7 @@
     {
       "field": "规模类型",
       "startStatus": "规划中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "策划组长",
       "memberFields": [
@@ -120,6 +121,7 @@
     {
       "field": "UI人员",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -136,6 +138,7 @@
     {
       "field": "群聊",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "excludedDemandTypes": [
         "bug",
@@ -152,6 +155,7 @@
     {
       "field": "前端开发",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "前端组长",
       "memberFields": [
@@ -161,6 +165,7 @@
     {
       "field": "后端开发",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "后端组长",
       "memberFields": [
@@ -170,6 +175,7 @@
     {
       "field": "前端剩余",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "前端开发",
@@ -197,6 +203,7 @@
     {
       "field": "后端剩余",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "后端开发",
@@ -231,6 +238,7 @@
     {
       "field": "UI需求",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "UI组长",
       "memberFields": [
@@ -240,6 +248,7 @@
     {
       "field": "动效需求",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "动效组长",
       "memberFields": [
@@ -249,6 +258,7 @@
     {
       "field": "动效人员",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "leaderRole": "动效组长",
       "memberFields": [
@@ -258,6 +268,7 @@
     {
       "field": "UI进度",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -274,6 +285,7 @@
     {
       "field": "动效进度",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "动效需求",
@@ -290,6 +302,7 @@
     {
       "field": "前端耗时",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "前端开发",
@@ -318,6 +331,7 @@
     {
       "field": "后端耗时",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "后端开发",
@@ -346,6 +360,7 @@
     {
       "field": "UI耗时",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -375,6 +390,7 @@
     {
       "field": "UI日方时间",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -400,6 +416,7 @@
     {
       "field": "UI剩余时间",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -426,8 +443,44 @@
       ]
     },
     {
+      "field": "监修时间",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "any": [
+          {
+            "field": "UI需求",
+            "notEquals": [
+              "-"
+            ],
+            "requireSourceValue": true
+          },
+          {
+            "field": "动效需求",
+            "notEquals": [
+              "-"
+            ],
+            "requireSourceValue": true
+          }
+        ]
+      },
+      "leaderRole": "UI组长",
+      "memberFields": [
+        "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "dateNotAfter",
+          "deadlineFields": [
+            "监修截止日期"
+          ]
+        }
+      ]
+    },
+    {
       "field": "UI开始时间",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -444,6 +497,7 @@
     {
       "field": "UI完成时间",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -472,6 +526,7 @@
     {
       "field": "前端_周",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "前端开发",
@@ -501,6 +556,7 @@
     {
       "field": "后端_周",
       "startStatus": "实现中",
+      "endStatus": "实现中",
       "required": true,
       "when": {
         "field": "后端开发",
@@ -545,6 +601,7 @@
     {
       "field": "需求设计耗时",
       "startStatus": "规划中",
+      "endStatus": "实现中",
       "required": true,
       "excludedDemandTypes": [
         "bug",
@@ -571,6 +628,7 @@
     {
       "field": "需求设计剩余",
       "startStatus": "规划中",
+      "endStatus": "实现中",
       "required": true,
       "excludedDemandTypes": [
         "bug",

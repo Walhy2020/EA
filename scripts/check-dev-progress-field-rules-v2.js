@@ -49,7 +49,8 @@ function ownerNames(items) {
 const normalizedFromSettings = getDevProgressSettings().rules.requiredFields;
 assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
-assert.strictEqual(normalizedFromSettings.fieldRules.length, 36);
+assert.strictEqual(normalizedFromSettings.fieldRules.length, 37);
+assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 23);
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
@@ -64,11 +65,12 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.0.1");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 36);
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.1.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 37);
+assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 23);
 
 const configuredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
-assert.ok(!configuredFields.has("监修时间"));
+assert.ok(configuredFields.has("监修时间"));
 assert.ok(!configuredFields.has("监修日期修正值"));
 assert.ok(!configuredFields.has("监修日期修正值（可负）"));
 
@@ -76,6 +78,11 @@ assert.strictEqual(fieldDecisions("群聊", {}, { demandType: "bug" }).length, 0
 assert.ok(fieldDecisions("群聊", {}, { demandType: "新功能" }).some((item) => item.missing));
 assert.strictEqual(fieldDecisions("需求设计耗时", {}, { demandType: "活动配置", status: "规划中" }).length, 0);
 assert.ok(fieldDecisions("需求设计剩余", {}, { demandType: "活动配置", status: "规划中" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "规划中" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "实现中" }).some((item) => item.missing));
+assert.strictEqual(fieldDecisions("规模类型", {}, { status: "内网验收中" }).length, 0);
+assert.ok(fieldDecisions("需求名称", {}, { status: "内网验收中" }).some((item) => item.missing));
+assert.ok(fieldDecisions("测试人员", {}, { status: "内网验收中" }).some((item) => item.missing));
 
 const noUiCascade = decisions({ UI需求: "" });
 assert.ok(noUiCascade.some((item) => item.fieldName === "UI需求" && item.missing));
@@ -151,5 +158,28 @@ const directDateViolation = fieldDecisions("UI日方时间", {
   美术截止日期: "2026-09-04"
 });
 assert.ok(directDateViolation.every((item) => item.missing && item.reason === "date_after_deadline"));
+
+assert.strictEqual(fieldDecisions("监修时间", {
+  UI需求: "-",
+  动效需求: "-"
+}).length, 0);
+const monitorRequired = fieldDecisions("监修时间", {
+  UI需求: "-",
+  动效需求: "需要动效",
+  监修时间: ""
+});
+assert.ok(monitorRequired.some((item) => item.missing && item.reason === "empty_value"));
+const monitorDeadlineViolation = fieldDecisions("监修时间", {
+  UI需求: "需要UI",
+  动效需求: "-",
+  监修时间: "2026-09-03",
+  监修截止日期: "2026-09-02"
+});
+assert.ok(monitorDeadlineViolation.every((item) => item.missing && item.reason === "date_after_deadline"));
+assert.ok(fieldDecisions("监修时间", {
+  UI需求: "需要UI",
+  动效需求: "-",
+  监修时间: ""
+}, { status: "内网验收中" }).some((item) => item.missing));
 
 console.log("Dev progress field rules v2 check passed");

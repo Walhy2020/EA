@@ -29,15 +29,36 @@ function missingFieldNames(demandType, status, groupChat) {
     .map((item) => item.fieldName))].sort();
 }
 
+function fieldIsMissing(fieldName, demandType, status, fields = {}) {
+  return inspectRequiredFields({
+    standard: { demandType, status },
+    fields
+  }, rules).some((item) => item.fieldName === fieldName && item.missing);
+}
+
 assert.deepStrictEqual(missingFieldNames("新功能", "待分配", ""), []);
 assert.deepStrictEqual(missingFieldNames("新功能", "规划中", ""), ["需求名称"]);
 assert.deepStrictEqual(missingFieldNames("新功能", "实现中", ""), ["群聊", "需求名称"]);
 assert.deepStrictEqual(missingFieldNames("新功能", "实现中", "需求群"), ["需求名称"]);
+assert.deepStrictEqual(missingFieldNames("新功能", "内网验收中", ""), ["需求名称"]);
 assert.deepStrictEqual(missingFieldNames("新功能", "测试阻塞", ""), []);
 assert.deepStrictEqual(missingFieldNames("任务拆分", "实现中", ""), []);
 
 assert.deepStrictEqual(missingFieldNames("配置", "实现中", ""), ["需求名称"]);
 assert.deepStrictEqual(missingFieldNames("bug", "实现中", ""), ["需求名称"]);
 assert.deepStrictEqual(missingFieldNames("配置bug", "实现中", ""), ["需求名称"]);
+
+assert.strictEqual(fieldIsMissing("规模类型", "新功能", "规划中"), true);
+assert.strictEqual(fieldIsMissing("规模类型", "新功能", "实现中"), true);
+assert.strictEqual(fieldIsMissing("规模类型", "新功能", "内网验收中"), false);
+assert.strictEqual(fieldIsMissing("测试人员", "新功能", "内网验收中"), true);
+assert.strictEqual(fieldIsMissing("监修时间", "新功能", "实现中", {
+  UI需求: "-",
+  动效需求: "需要动效"
+}), true);
+assert.strictEqual(fieldIsMissing("监修时间", "新功能", "实现中", {
+  UI需求: "-",
+  动效需求: "-"
+}), false);
 
 console.log("Dev progress field-rule activation checks passed.");

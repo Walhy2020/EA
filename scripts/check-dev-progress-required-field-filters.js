@@ -20,8 +20,7 @@ for (const oldField of [
   "程序开发交付日期",
   "动效监修完成日期",
   "内网验收/测试完成日期",
-  "正式验收/测试完成日期",
-  "监修时间"
+  "正式验收/测试完成日期"
 ]) {
   assert.ok(!monitoredFields.has(oldField), `legacy field must be removed: ${oldField}`);
 }
@@ -29,5 +28,7 @@ for (const oldField of [
 assert.ok(monitoredFields.has("UI完成时间"));
 assert.ok(monitoredFields.has("前端耗时"));
 assert.ok(monitoredFields.has("动效制作交付日期"));
+assert.ok(monitoredFields.has("监修时间"));
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "实现中").length, 23);
 
 console.log("Dev progress legacy required-field filters are disabled");

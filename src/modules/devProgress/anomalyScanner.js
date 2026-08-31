@@ -337,6 +337,14 @@ function uniqueFieldEntries(entries) {
 }
 
 function fieldRuleConditionMatches(record, condition = {}) {
+  const anyConditions = Array.isArray(condition.any) ? condition.any : [];
+  if (anyConditions.length > 0 && !anyConditions.some((item) => fieldRuleConditionMatches(record, item))) {
+    return false;
+  }
+  const allConditions = Array.isArray(condition.all) ? condition.all : [];
+  if (allConditions.length > 0 && !allConditions.every((item) => fieldRuleConditionMatches(record, item))) {
+    return false;
+  }
   const fieldName = normalizedText(condition.field);
   if (!fieldName) {
     return true;
@@ -360,7 +368,9 @@ function fieldRuleIsActive(record, fieldRule, requiredRule) {
   const statusSequence = normalizedArray(requiredRule.statusSequence || []);
   const statusIndex = statusSequence.indexOf(status);
   const startIndex = statusSequence.indexOf(normalizedText(fieldRule.startStatus));
-  if (statusIndex < 0 || startIndex < 0) {
+  const endStatus = normalizedText(fieldRule.endStatus);
+  const endIndex = endStatus ? statusSequence.indexOf(endStatus) : statusSequence.length - 1;
+  if (statusIndex < 0 || startIndex < 0 || endIndex < 0) {
     return false;
   }
   const globalExcluded = normalizedArray(requiredRule.excludedDemandTypes || []);
@@ -371,7 +381,9 @@ function fieldRuleIsActive(record, fieldRule, requiredRule) {
   const stageMatches = requiredRule.stageInclusive === false
     ? statusIndex > startIndex
     : statusIndex >= startIndex;
-  return stageMatches && fieldRuleConditionMatches(record, fieldRule.when || {});
+  return stageMatches
+    && statusIndex <= endIndex
+    && fieldRuleConditionMatches(record, fieldRule.when || {});
 }
 
 function fieldRuleLeaderNames(record, fieldRule, requiredRule) {
@@ -955,7 +967,10 @@ function scanDevProgressAnomalies(records, rules, options = {}) {
         ? rules.requiredFields.fieldRules.length
         : (rules.requiredFields && Array.isArray(rules.requiredFields.items)
           ? rules.requiredFields.items.length
-          : 0)
+          : 0),
+      requiredFieldBoundedRuleCount: rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
+        ? rules.requiredFields.fieldRules.filter((rule) => normalizedText(rule.endStatus)).length
+        : 0
     },
     anomalies
   };
