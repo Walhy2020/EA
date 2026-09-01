@@ -653,7 +653,13 @@ function inspectRequiredFields(record, rules, options = {}) {
     return [];
   }
 
-  const requiredEntries = requiredFieldEntriesForRecord(record, rule);
+  const availableFieldTitles = options.availableFieldTitles instanceof Set
+    ? options.availableFieldTitles
+    : (Array.isArray(options.availableFieldTitles)
+      ? new Set(normalizedArray(options.availableFieldTitles))
+      : null);
+  const requiredEntries = requiredFieldEntriesForRecord(record, rule)
+    .filter((entry) => !availableFieldTitles || availableFieldTitles.has(entry.fieldName));
   const usesFieldRules = rule.mode === "fieldRulesV2" || (Array.isArray(rule.fieldRules) && rule.fieldRules.length > 0);
   const filteredEntries = usesFieldRules
     ? requiredEntries
@@ -939,6 +945,19 @@ function scanDevProgressAnomalies(records, rules, options = {}) {
 
   const anomalies = [...result.values()]
     .sort((left, right) => right.issues.length - left.issues.length || String(left.task.demandId).localeCompare(String(right.task.demandId)));
+  const configuredFieldRules = rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
+    ? rules.requiredFields.fieldRules
+    : [];
+  const availableFieldTitles = options.availableFieldTitles instanceof Set
+    ? options.availableFieldTitles
+    : (Array.isArray(options.availableFieldTitles)
+      ? new Set(normalizedArray(options.availableFieldTitles))
+      : null);
+  const unavailableRequiredFieldNames = availableFieldTitles
+    ? uniqueValues(configuredFieldRules
+      .map((rule) => normalizedText(rule.field))
+      .filter((fieldName) => fieldName && !availableFieldTitles.has(fieldName)))
+    : [];
   return {
     ok: true,
     scannedCount: records.length,
@@ -962,15 +981,18 @@ function scanDevProgressAnomalies(records, rules, options = {}) {
       requiredFieldsEnabled: Boolean(rules.requiredFields && rules.requiredFields.enabled),
       requiredFieldRuleMode: rules.requiredFields && rules.requiredFields.mode || "legacyMatrix",
       requiredFieldRuleVersion: rules.requiredFields && rules.requiredFields.version || "",
-      requiredFieldRuleCount: rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
-        && rules.requiredFields.fieldRules.length > 0
-        ? rules.requiredFields.fieldRules.length
+      requiredFieldRuleSourceVersion: rules.requiredFields && rules.requiredFields.sourceVersion || "",
+      requiredFieldRuleCount: configuredFieldRules.length > 0
+        ? configuredFieldRules.length
         : (rules.requiredFields && Array.isArray(rules.requiredFields.items)
           ? rules.requiredFields.items.length
           : 0),
-      requiredFieldBoundedRuleCount: rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
-        ? rules.requiredFields.fieldRules.filter((rule) => normalizedText(rule.endStatus)).length
-        : 0
+      requiredFieldAvailableRuleCount: availableFieldTitles
+        ? configuredFieldRules.length - unavailableRequiredFieldNames.length
+        : configuredFieldRules.length,
+      requiredFieldUnavailableRuleCount: unavailableRequiredFieldNames.length,
+      requiredFieldUnavailableFields: unavailableRequiredFieldNames,
+      requiredFieldBoundedRuleCount: configuredFieldRules.filter((rule) => normalizedText(rule.endStatus)).length
     },
     anomalies
   };

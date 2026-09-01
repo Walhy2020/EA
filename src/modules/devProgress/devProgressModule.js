@@ -9,6 +9,7 @@ const {
 const {
   previewDevProgressRecords,
   readDevProgressDocumentInfo,
+  readDevProgressFieldDefinitions,
   readDevProgressRecords,
   readDevProgressWorkdayCalendar
 } = require("./wecomSmartsheetClient");
@@ -26,7 +27,7 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
-const H5_MONITOR_CACHE_VERSION = 15;
+const H5_MONITOR_CACHE_VERSION = 16;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {
@@ -2181,6 +2182,84 @@ function createDevProgressModule(options = {}) {
       };
     }
 
+    const fieldSchemaStartedAt = Date.now();
+    let fieldSchema = {
+      ok: false,
+      status: "not_checked",
+      fields: [],
+      fieldTitles: []
+    };
+    try {
+      fieldSchema = await readDevProgressFieldDefinitions(settings);
+    } catch (error) {
+      fieldSchema = {
+        ok: false,
+        status: "field_schema_error",
+        message: error && error.message ? error.message : String(error || ""),
+        fields: [],
+        fieldTitles: []
+      };
+    }
+    const fieldSchemaMs = Date.now() - fieldSchemaStartedAt;
+    const configuredFieldRules = rules.requiredFields && Array.isArray(rules.requiredFields.fieldRules)
+      ? rules.requiredFields.fieldRules
+      : [];
+    if (!fieldSchema.ok) {
+      const perf = {
+        totalMs: Date.now() - totalStartedAt,
+        readMs,
+        fieldSchemaMs,
+        calendarMs: 0,
+        analyzeMs: 0,
+        read: result.perf || null,
+        fieldSchema: {
+          ok: false,
+          status: fieldSchema.status || "field_schema_unavailable",
+          fieldCount: 0,
+          unavailableRequiredFields: []
+        }
+      };
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Dev progress demand sheet field schema unavailable, abort scan", {
+          ruleSource: rules.requiredFields && rules.requiredFields.source || "",
+          ruleSourceVersion: rules.requiredFields && rules.requiredFields.sourceVersion || "",
+          configuredRuleCount: configuredFieldRules.length,
+          status: fieldSchema.status || "field_schema_unavailable",
+          message: fieldSchema.message || fieldSchema.errmsg || "",
+          perf
+        });
+      }
+      return {
+        settings,
+        rules,
+        readResult: result,
+        scanResult: {
+          ok: false,
+          module: "devProgress",
+          code: "field_schema_unavailable",
+          text: `需求总表列结构读取失败：${fieldSchema.errcode || ""} ${fieldSchema.errmsg || fieldSchema.message || ""}`.trim(),
+          perf,
+          data: fieldSchema
+        }
+      };
+    }
+    const availableFieldTitleSet = fieldSchema.ok ? new Set(fieldSchema.fieldTitles || []) : null;
+    const unavailableRequiredFields = availableFieldTitleSet
+      ? uniqueMerge(configuredFieldRules
+        .map((rule) => String(rule.field || "").trim())
+        .filter((fieldName) => fieldName && !availableFieldTitleSet.has(fieldName)))
+      : [];
+    if (logger && typeof logger.warn === "function" && unavailableRequiredFields.length > 0) {
+      logger.warn("Dev progress rule fields missing from demand sheet", {
+        ruleSource: rules.requiredFields && rules.requiredFields.source || "",
+        ruleSourceVersion: rules.requiredFields && rules.requiredFields.sourceVersion || "",
+        configuredRuleCount: configuredFieldRules.length,
+        availableSheetFieldCount: fieldSchema.fieldTitles.length,
+        unavailableRuleCount: unavailableRequiredFields.length,
+        unavailableFields: unavailableRequiredFields
+      });
+    }
+
     const calendarStartedAt = Date.now();
     let workdayCalendar = {
       ok: false,
@@ -2222,15 +2301,23 @@ function createDevProgressModule(options = {}) {
     const scanResult = scanDevProgressAnomalies(result.records, rules, {
       focusDemandIds: scanOptions.focusDemandIds,
       today: scanOptions.today,
-      workdayDates: workdayCalendar.dates || []
+      workdayDates: workdayCalendar.dates || [],
+      availableFieldTitles: availableFieldTitleSet || undefined
     });
     const analyzeMs = Date.now() - analyzeStartedAt;
     const perf = {
       totalMs: Date.now() - totalStartedAt,
       readMs,
+      fieldSchemaMs,
       calendarMs,
       analyzeMs,
       read: result.perf || null,
+      fieldSchema: {
+        ok: Boolean(fieldSchema.ok),
+        status: fieldSchema.status || "",
+        fieldCount: Array.isArray(fieldSchema.fieldTitles) ? fieldSchema.fieldTitles.length : 0,
+        unavailableRequiredFields
+      },
       workdayCalendar: {
         ok: Boolean(workdayCalendar.ok),
         status: workdayCalendar.status || "",
@@ -2245,6 +2332,11 @@ function createDevProgressModule(options = {}) {
         limit: result.limit,
         scannedCount: scanResult.scannedCount,
         anomalyCount: scanResult.anomalyCount,
+        ruleSourceVersion: scanResult.rules.requiredFieldRuleSourceVersion,
+        configuredRuleCount: scanResult.rules.requiredFieldRuleCount,
+        availableRuleCount: scanResult.rules.requiredFieldAvailableRuleCount,
+        unavailableRuleCount: scanResult.rules.requiredFieldUnavailableRuleCount,
+        unavailableFields: scanResult.rules.requiredFieldUnavailableFields,
         workdayCalendarStatus: workdayCalendar.status || "",
         workdayDateCount: Number(workdayCalendar.dateCount || 0),
         perf

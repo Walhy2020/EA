@@ -49,8 +49,9 @@ function ownerNames(items) {
 const normalizedFromSettings = getDevProgressSettings().rules.requiredFields;
 assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
-assert.strictEqual(normalizedFromSettings.fieldRules.length, 37);
+assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
 assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 23);
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0001");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
@@ -65,12 +66,19 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.1.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 37);
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.2.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0001");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
 assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 23);
 
 const configuredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
 assert.ok(configuredFields.has("监修时间"));
+assert.ok(configuredFields.has("特效制作耗时"));
+assert.ok(configuredFields.has("特效制作剩余"));
+assert.ok(configuredFields.has("动作制作耗时"));
+assert.ok(configuredFields.has("动作制作剩余"));
+assert.ok(!configuredFields.has("动效制作耗时"));
+assert.ok(!configuredFields.has("动效制作剩余"));
 assert.ok(!configuredFields.has("监修日期修正值"));
 assert.ok(!configuredFields.has("监修日期修正值（可负）"));
 
@@ -181,5 +189,18 @@ assert.ok(fieldDecisions("监修时间", {
   动效需求: "-",
   监修时间: ""
 }, { status: "内网验收中" }).some((item) => item.missing));
+
+const liveFieldTitles = [...configuredFields].filter((fieldName) => fieldName !== "监修时间");
+assert.strictEqual(fieldDecisions("监修时间", {
+  UI需求: "需要UI",
+  动效需求: "-"
+}, {}, { availableFieldTitles: liveFieldTitles }).length, 0);
+const schemaSummary = scanDevProgressAnomalies([record({
+  UI需求: "需要UI",
+  动效需求: "-"
+})], { requiredFields }, { availableFieldTitles: liveFieldTitles });
+assert.strictEqual(schemaSummary.rules.requiredFieldAvailableRuleCount, 38);
+assert.strictEqual(schemaSummary.rules.requiredFieldUnavailableRuleCount, 1);
+assert.deepStrictEqual(schemaSummary.rules.requiredFieldUnavailableFields, ["监修时间"]);
 
 console.log("Dev progress field rules v2 check passed");

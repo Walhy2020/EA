@@ -1,6 +1,7 @@
 {
-  "version": "2.1.0",
+  "version": "2.2.0",
   "source": "需求总表字段监控归类.xlsx",
+  "sourceVersion": "V0001",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -700,7 +701,7 @@
       ]
     },
     {
-      "field": "动效制作耗时",
+      "field": "特效制作耗时",
       "startStatus": "实现中",
       "required": true,
       "when": {
@@ -716,7 +717,51 @@
       ]
     },
     {
-      "field": "动效制作剩余",
+      "field": "特效制作剩余",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ],
+      "validations": [
+        {
+          "type": "workdayNotAfter",
+          "base": {
+            "type": "today"
+          },
+          "deadlineFields": [
+            "动效制作交付日期",
+            "美术截止日期"
+          ]
+        }
+      ]
+    },
+    {
+      "field": "动作制作耗时",
+      "startStatus": "实现中",
+      "required": true,
+      "when": {
+        "field": "动效需求",
+        "notEquals": [
+          "-"
+        ],
+        "requireSourceValue": true
+      },
+      "leaderRole": "动效组长",
+      "memberFields": [
+        "动效人员"
+      ]
+    },
+    {
+      "field": "动作制作剩余",
       "startStatus": "实现中",
       "required": true,
       "when": {

@@ -995,6 +995,42 @@ async function getLookupResolver(settings, accessToken, options = {}) {
   return { ...value, cacheHit: false };
 }
 
+async function readDevProgressFieldDefinitions(settings) {
+  const missing = missingRequired(settings);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: "incomplete",
+      message: `缺少配置：${missing.join("、")}`,
+      missing,
+      fields: [],
+      fieldTitles: []
+    };
+  }
+
+  const tokenInfo = await getAccessTokenInfo(settings);
+  const data = await postWeDoc("smartsheet/get_fields", tokenInfo.accessToken, {
+    docid: settings.docid,
+    sheet_id: settings.sheetId
+  });
+  const fields = data.errcode === 0
+    ? collectFieldDefinitions(data).map((field) => ({
+      fieldId: field.fieldId,
+      title: field.title,
+      type: field.type
+    }))
+    : [];
+  return {
+    ok: data.errcode === 0,
+    status: data.errcode === 0 ? "ok" : "fields_unavailable",
+    errcode: data.errcode,
+    errmsg: data.errmsg,
+    fields,
+    fieldTitles: uniqueNonEmpty(fields.map((field) => field.title)),
+    tokenCacheHit: tokenInfo.cacheHit
+  };
+}
+
 function applyLookupFallbacks(rawRecords, resolver, userNameMap) {
   const sourcesByRecordId = new Map();
   for (const record of rawRecords) {
@@ -1234,6 +1270,7 @@ module.exports = {
   previewDevProgressRecords,
   readDevProgressRecords,
   readDevProgressDocumentInfo,
+  readDevProgressFieldDefinitions,
   readDevProgressWorkdayCalendar,
   testDevProgressConnection
 };
