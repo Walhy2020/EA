@@ -35,7 +35,10 @@ assert.ok(monitoredFields.has("特效制作耗时"));
 assert.ok(monitoredFields.has("特效制作剩余"));
 assert.ok(monitoredFields.has("动作制作耗时"));
 assert.ok(monitoredFields.has("动作制作剩余"));
-assert.strictEqual(requiredFields.sourceVersion, "V0001");
-assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "实现中").length, 23);
+assert.strictEqual(requiredFields.sourceVersion, "V0002");
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "实现中").length, 20);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "测试1验收/测试中").length, 2);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "测试服全完成").length, 10);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "已上线").length, 7);
 
 console.log("Dev progress legacy required-field filters are disabled");

@@ -361,28 +361,37 @@ function fieldRuleConditionMatches(record, condition = {}) {
   return !notEquals.includes(value);
 }
 
+function statusRangeMatches(status, startStatus, endStatus, requiredRule, startInclusive = true) {
+  const statusSequence = normalizedArray(requiredRule.statusSequence || []);
+  const statusIndex = statusSequence.indexOf(normalizedText(status));
+  const startIndex = statusSequence.indexOf(normalizedText(startStatus));
+  const normalizedEndStatus = normalizedText(endStatus);
+  const endIndex = normalizedEndStatus
+    ? statusSequence.indexOf(normalizedEndStatus)
+    : statusSequence.length - 1;
+  if (statusIndex < 0 || startIndex < 0 || endIndex < 0) {
+    return false;
+  }
+  return (startInclusive ? statusIndex >= startIndex : statusIndex > startIndex)
+    && statusIndex <= endIndex;
+}
+
 function fieldRuleIsActive(record, fieldRule, requiredRule) {
   const standard = record.standard || {};
   const status = normalizedText(standard.status);
   const demandType = normalizedText(standard.demandType);
-  const statusSequence = normalizedArray(requiredRule.statusSequence || []);
-  const statusIndex = statusSequence.indexOf(status);
-  const startIndex = statusSequence.indexOf(normalizedText(fieldRule.startStatus));
-  const endStatus = normalizedText(fieldRule.endStatus);
-  const endIndex = endStatus ? statusSequence.indexOf(endStatus) : statusSequence.length - 1;
-  if (statusIndex < 0 || startIndex < 0 || endIndex < 0) {
-    return false;
-  }
   const globalExcluded = normalizedArray(requiredRule.excludedDemandTypes || []);
   const ruleExcluded = normalizedArray(fieldRule.excludedDemandTypes || []);
   if (globalExcluded.includes(demandType) || ruleExcluded.includes(demandType)) {
     return false;
   }
-  const stageMatches = requiredRule.stageInclusive === false
-    ? statusIndex > startIndex
-    : statusIndex >= startIndex;
-  return stageMatches
-    && statusIndex <= endIndex
+  return statusRangeMatches(
+    status,
+    fieldRule.startStatus,
+    fieldRule.endStatus,
+    requiredRule,
+    requiredRule.stageInclusive !== false
+  )
     && fieldRuleConditionMatches(record, fieldRule.when || {});
 }
 
@@ -564,7 +573,20 @@ function validationProblem(fieldName, code, message, details = {}) {
   return { fieldName, code, message, ...details };
 }
 
-function inspectFieldValidations(record, entry, options = {}) {
+function fieldValidationIsActive(record, validation, requiredRule) {
+  if (!normalizedText(validation.startStatus)) {
+    return true;
+  }
+  return statusRangeMatches(
+    record.standard && record.standard.status,
+    validation.startStatus,
+    validation.endStatus,
+    requiredRule,
+    true
+  );
+}
+
+function inspectFieldValidations(record, entry, requiredRule, options = {}) {
   const fieldRule = entry.fieldRule || {};
   const validations = Array.isArray(fieldRule.validations) ? fieldRule.validations : [];
   const problems = [];
@@ -573,6 +595,51 @@ function inspectFieldValidations(record, entry, options = {}) {
   const workdayLabels = normalizedWorkdayLabels(options.workdayDates || []);
 
   for (const validation of validations) {
+    if (!fieldValidationIsActive(record, validation, requiredRule)) {
+      continue;
+    }
+    if (validation.type === "numberAtMost") {
+      const rawValue = recordFieldValue(record, entry.fieldName);
+      if (isEmptyRequiredValue(rawValue)) {
+        continue;
+      }
+      const number = parseRequiredNumber(rawValue);
+      if (!Number.isFinite(number)) {
+        problems.push(validationProblem(entry.fieldName, "invalid_number", `${entry.fieldName}不是有效数字`));
+        continue;
+      }
+      const maximum = validation.maximum;
+      if (!Number.isFinite(maximum)) {
+        skipped.push({ code: "validation_configuration_invalid", fieldName: entry.fieldName, type: validation.type });
+        continue;
+      }
+      if (number > maximum) {
+        problems.push(validationProblem(
+          entry.fieldName,
+          "number_above_maximum",
+          `${entry.fieldName}不得大于${maximum}`,
+          { maximum, actualValue: number }
+        ));
+      }
+      continue;
+    }
+    if (validation.type === "valueNotIn") {
+      const value = normalizedText(recordFieldValue(record, entry.fieldName));
+      if (!value) {
+        continue;
+      }
+      const disallowedValues = normalizedArray(validation.values || []);
+      if (disallowedValues.includes(value)) {
+        problems.push(validationProblem(
+          entry.fieldName,
+          "value_not_allowed",
+          `${entry.fieldName}当前阶段不得为${value}`,
+          { actualValue: value, disallowedValues }
+        ));
+      }
+      continue;
+    }
+
     const deadlineRefs = Array.isArray(validation.deadlineFields) ? validation.deadlineFields : [];
     const deadlines = deadlineRefs
       .map((reference) => ({ reference, date: resolveValidationDate(record, reference) }))
@@ -673,7 +740,7 @@ function inspectRequiredFields(record, rules, options = {}) {
       : [];
     const validationResult = problems.length > 0
       ? { problems: [], skipped: [] }
-      : inspectFieldValidations(record, entry, options);
+      : inspectFieldValidations(record, entry, rule, options);
     problems.push(...validationResult.problems);
     const missing = problems.length > 0;
     return {

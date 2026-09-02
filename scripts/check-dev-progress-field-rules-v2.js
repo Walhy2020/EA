@@ -50,8 +50,8 @@ const normalizedFromSettings = getDevProgressSettings().rules.requiredFields;
 assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
 assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
-assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 23);
-assert.strictEqual(normalizedFromSettings.sourceVersion, "V0001");
+assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 39);
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0002");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
@@ -66,10 +66,10 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.2.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0001");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.3.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0002");
 assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
-assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 23);
+assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 39);
 
 const configuredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
 assert.ok(configuredFields.has("监修时间"));
@@ -88,9 +88,12 @@ assert.strictEqual(fieldDecisions("需求设计耗时", {}, { demandType: "活�
 assert.ok(fieldDecisions("需求设计剩余", {}, { demandType: "活动配置", status: "规划中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("规模类型", {}, { status: "规划中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("规模类型", {}, { status: "实现中" }).some((item) => item.missing));
-assert.strictEqual(fieldDecisions("规模类型", {}, { status: "内网验收中" }).length, 0);
+assert.ok(fieldDecisions("规模类型", {}, { status: "内网验收中" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "已上线" }).some((item) => item.missing));
 assert.ok(fieldDecisions("需求名称", {}, { status: "内网验收中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("测试人员", {}, { status: "内网验收中" }).some((item) => item.missing));
+assert.ok(fieldDecisions("测试人员", {}, { status: "测试服全完成" }).some((item) => item.missing));
+assert.strictEqual(fieldDecisions("测试人员", {}, { status: "已上线" }).length, 0);
 
 const noUiCascade = decisions({ UI需求: "" });
 assert.ok(noUiCascade.some((item) => item.fieldName === "UI需求" && item.missing));
@@ -166,6 +169,77 @@ const directDateViolation = fieldDecisions("UI日方时间", {
   美术截止日期: "2026-09-04"
 });
 assert.ok(directDateViolation.every((item) => item.missing && item.reason === "date_after_deadline"));
+
+const frontendRemainingDuringDevelopment = fieldDecisions("前端剩余", {
+  前端开发: "赵鹏",
+  前端剩余: "2",
+  开发截止日期: "2026-09-03"
+}, { status: "实现中" }, { today: new Date(2026, 7, 31), workdayDates });
+assert.ok(frontendRemainingDuringDevelopment.every((item) => !item.missing));
+
+const frontendRemainingDuringAcceptance = fieldDecisions("前端剩余", {
+  前端开发: "赵鹏",
+  前端剩余: "1",
+  开发截止日期: "2026-09-03"
+}, { status: "内网验收中" }, { today: new Date(2026, 7, 31), workdayDates });
+assert.ok(frontendRemainingDuringAcceptance.every((item) => (
+  item.missing && item.reason === "number_above_maximum" && item.problems[0].maximum === 0
+)));
+assert.ok(fieldDecisions("前端剩余", {
+  前端开发: "赵鹏",
+  前端剩余: "0",
+  开发截止日期: "2026-09-03"
+}, { status: "内网验收中" }, { today: new Date(2026, 7, 31), workdayDates }).every((item) => !item.missing));
+assert.strictEqual(fieldDecisions("前端剩余", {
+  前端开发: "赵鹏",
+  前端剩余: "1",
+  开发截止日期: "2026-09-03"
+}, { status: "测试服全完成" }, { today: new Date(2026, 7, 31), workdayDates }).length, 0);
+
+const uiProgressDuringDevelopment = fieldDecisions("UI进度", {
+  UI需求: "需要UI",
+  UI进度: "待分配"
+}, { status: "实现中" });
+assert.ok(uiProgressDuringDevelopment.every((item) => !item.missing));
+for (const status of ["内网验收中", "测试服全完成"]) {
+  const invalidUiProgress = fieldDecisions("UI进度", {
+    UI需求: "需要UI",
+    UI进度: "制作/拆分中"
+  }, { status });
+  assert.ok(invalidUiProgress.every((item) => item.missing && item.reason === "value_not_allowed"));
+}
+assert.strictEqual(fieldDecisions("UI进度", {
+  UI需求: "需要UI",
+  UI进度: "制作/拆分中"
+}, { status: "已上线" }).length, 0);
+
+const invalidEffectProgress = fieldDecisions("动效进度", {
+  动效需求: "需要动效",
+  动效进度: "制作中"
+}, { status: "内网测试中" });
+assert.ok(invalidEffectProgress.every((item) => item.missing && item.reason === "value_not_allowed"));
+
+for (const fieldName of [
+  "UI剩余时间", "需求设计剩余", "配置/数值剩余", "特效制作剩余", "动作制作剩余"
+]) {
+  const fields = {
+    [fieldName]: "1",
+    UI需求: "需要UI",
+    动效需求: "需要动效",
+    策划人员: "张三",
+    UI人员: "李四",
+    动效人员: "王五",
+    需求截止日期: "2026-09-03",
+    配置截止日期: "2026-09-03",
+    动效制作交付日期: "2026-09-03",
+    美术截止日期: "2026-09-03"
+  };
+  const invalidRemaining = fieldDecisions(fieldName, fields, { status: "测试服全完成" }, {
+    today: new Date(2026, 7, 31),
+    workdayDates
+  });
+  assert.ok(invalidRemaining.every((item) => item.missing && item.reason === "number_above_maximum"), fieldName);
+}
 
 assert.strictEqual(fieldDecisions("监修时间", {
   UI需求: "-",

@@ -1,7 +1,7 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0001",
+  "sourceVersion": "V0002",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -64,7 +64,8 @@
       "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
-      ]
+      ],
+      "endStatus": "已上线"
     },
     {
       "field": "项目",
@@ -73,7 +74,8 @@
       "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
-      ]
+      ],
+      "endStatus": "已上线"
     },
     {
       "field": "需求名称",
@@ -82,7 +84,8 @@
       "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
-      ]
+      ],
+      "endStatus": "已上线"
     },
     {
       "field": "更新时间",
@@ -91,7 +94,8 @@
       "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
-      ]
+      ],
+      "endStatus": "已上线"
     },
     {
       "field": "需求内容",
@@ -100,19 +104,21 @@
       "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
-      ]
+      ],
+      "endStatus": "已上线"
     },
     {
       "field": "策划人员",
       "startStatus": "规划中",
       "required": true,
       "leaderRole": "策划组长",
-      "memberFields": []
+      "memberFields": [],
+      "endStatus": "已上线"
     },
     {
       "field": "规模类型",
       "startStatus": "规划中",
-      "endStatus": "实现中",
+      "endStatus": "已上线",
       "required": true,
       "leaderRole": "策划组长",
       "memberFields": [
@@ -176,7 +182,7 @@
     {
       "field": "前端剩余",
       "startStatus": "实现中",
-      "endStatus": "实现中",
+      "endStatus": "测试1验收/测试中",
       "required": true,
       "when": {
         "field": "前端开发",
@@ -198,13 +204,19 @@
           "deadlineFields": [
             "开发截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试1验收/测试中"
         }
       ]
     },
     {
       "field": "后端剩余",
       "startStatus": "实现中",
-      "endStatus": "实现中",
+      "endStatus": "测试1验收/测试中",
       "required": true,
       "when": {
         "field": "后端开发",
@@ -226,6 +238,12 @@
           "deadlineFields": [
             "开发截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试1验收/测试中"
         }
       ]
     },
@@ -234,7 +252,8 @@
       "startStatus": "实现中",
       "required": true,
       "leaderRole": "测试组长",
-      "memberFields": []
+      "memberFields": [],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "UI需求",
@@ -269,7 +288,7 @@
     {
       "field": "UI进度",
       "startStatus": "实现中",
-      "endStatus": "实现中",
+      "endStatus": "测试服全完成",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -281,12 +300,24 @@
       "leaderRole": "UI组长",
       "memberFields": [
         "UI人员"
+      ],
+      "validations": [
+        {
+          "type": "valueNotIn",
+          "values": [
+            "待分配",
+            "日方制作中",
+            "制作/拆分中"
+          ],
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
+        }
       ]
     },
     {
       "field": "动效进度",
       "startStatus": "实现中",
-      "endStatus": "实现中",
+      "endStatus": "测试服全完成",
       "required": true,
       "when": {
         "field": "动效需求",
@@ -298,6 +329,17 @@
       "leaderRole": "动效组长",
       "memberFields": [
         "动效人员"
+      ],
+      "validations": [
+        {
+          "type": "valueNotIn",
+          "values": [
+            "待分配",
+            "制作中"
+          ],
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
+        }
       ]
     },
     {
@@ -417,7 +459,7 @@
     {
       "field": "UI剩余时间",
       "startStatus": "实现中",
-      "endStatus": "实现中",
+      "endStatus": "测试服全完成",
       "required": true,
       "when": {
         "field": "UI需求",
@@ -440,6 +482,12 @@
             "美术截止日期",
             "UI完成时间"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
         }
       ]
     },
@@ -476,7 +524,8 @@
             "监修截止日期"
           ]
         }
-      ]
+      ],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "UI开始时间",
@@ -597,7 +646,8 @@
       "memberFields": [
         "前端开发",
         "后端开发"
-      ]
+      ],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "需求设计耗时",
@@ -629,7 +679,7 @@
     {
       "field": "需求设计剩余",
       "startStatus": "规划中",
-      "endStatus": "实现中",
+      "endStatus": "测试服全完成",
       "required": true,
       "excludedDemandTypes": [
         "bug",
@@ -649,6 +699,12 @@
           "deadlineFields": [
             "需求截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
         }
       ]
     },
@@ -674,7 +730,8 @@
             "配置截止日期"
           ]
         }
-      ]
+      ],
+      "endStatus": "实现中"
     },
     {
       "field": "配置/数值剩余",
@@ -697,8 +754,15 @@
           "deadlineFields": [
             "配置截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
         }
-      ]
+      ],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "特效制作耗时",
@@ -714,7 +778,8 @@
       "leaderRole": "动效组长",
       "memberFields": [
         "动效人员"
-      ]
+      ],
+      "endStatus": "实现中"
     },
     {
       "field": "特效制作剩余",
@@ -741,8 +806,15 @@
             "动效制作交付日期",
             "美术截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
         }
-      ]
+      ],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "动作制作耗时",
@@ -758,7 +830,8 @@
       "leaderRole": "动效组长",
       "memberFields": [
         "动效人员"
-      ]
+      ],
+      "endStatus": "实现中"
     },
     {
       "field": "动作制作剩余",
@@ -785,8 +858,15 @@
             "动效制作交付日期",
             "美术截止日期"
           ]
+        },
+        {
+          "type": "numberAtMost",
+          "maximum": 0,
+          "startStatus": "内网验收中",
+          "endStatus": "测试服全完成"
         }
-      ]
+      ],
+      "endStatus": "测试服全完成"
     },
     {
       "field": "动效制作交付日期",
@@ -810,7 +890,8 @@
             "美术截止日期"
           ]
         }
-      ]
+      ],
+      "endStatus": "实现中"
     }
   ]
 }

@@ -27,7 +27,7 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
-const H5_MONITOR_CACHE_VERSION = 16;
+const H5_MONITOR_CACHE_VERSION = 17;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {

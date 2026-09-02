@@ -50,8 +50,10 @@ assert.deepStrictEqual(missingFieldNames("配置bug", "实现中", ""), ["需求
 
 assert.strictEqual(fieldIsMissing("规模类型", "新功能", "规划中"), true);
 assert.strictEqual(fieldIsMissing("规模类型", "新功能", "实现中"), true);
-assert.strictEqual(fieldIsMissing("规模类型", "新功能", "内网验收中"), false);
+assert.strictEqual(fieldIsMissing("规模类型", "新功能", "内网验收中"), true);
+assert.strictEqual(fieldIsMissing("规模类型", "新功能", "已上线"), true);
 assert.strictEqual(fieldIsMissing("测试人员", "新功能", "内网验收中"), true);
+assert.strictEqual(fieldIsMissing("测试人员", "新功能", "已上线"), false);
 assert.strictEqual(fieldIsMissing("监修时间", "新功能", "实现中", {
   UI需求: "-",
   动效需求: "需要动效"

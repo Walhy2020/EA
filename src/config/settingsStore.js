@@ -544,8 +544,15 @@ function normalizeFieldValidation(value) {
   const base = input.base && typeof input.base === "object" && !Array.isArray(input.base)
     ? input.base
     : {};
+  const maximum = input.maximum === undefined || input.maximum === null || input.maximum === ""
+    ? null
+    : Number(input.maximum);
   return {
     type: String(input.type || "").trim(),
+    startStatus: String(input.startStatus || "").trim(),
+    endStatus: String(input.endStatus || "").trim(),
+    values: normalizeRequiredFieldNames(input.values),
+    maximum: Number.isFinite(maximum) ? maximum : null,
     amountField: String(input.amountField || "").trim(),
     base: {
       type: String(base.type || "").trim(),
