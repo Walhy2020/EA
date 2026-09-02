@@ -530,6 +530,7 @@ async function main() {
       drafts: []
     }, null, 2)}\n`, "utf8");
     const linkedMessages = [];
+    const linkedRecalledMessageIds = [];
     const linkedReminderWatchdog = createWatchdogModule({
       storeFile: linkedReminderStoreFile,
       moduleConfig: {
@@ -548,14 +549,23 @@ async function main() {
         send: async (message) => {
           linkedMessages.push(message);
           return { ok: true, msgid: `linked-${linkedMessages.length}` };
+        },
+        recallMessage: async (message) => {
+          linkedRecalledMessageIds.push(message.msgid);
+          return { ok: true, msgid: message.msgid };
         }
       },
       logger: { info() {}, warn() {} }
     });
     await linkedReminderWatchdog.tick();
-    assert.equal(linkedMessages.length, 1);
-    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").appPushMessages.length, 1);
-    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").appPushMessages[0].msgid, "linked-1");
+    assert.equal(linkedMessages.length, 2);
+    const linkedTaskAfterSend = taskById(linkedReminderStoreFile, "wd_linked_reminder");
+    assert.equal(linkedTaskAfterSend.appPushMessages.length, 2);
+    assert.equal(linkedTaskAfterSend.appPushMessages[0].msgid, "linked-1");
+    assert.equal(linkedTaskAfterSend.appPushMessages[0].targetRole, "assignee");
+    assert.equal(linkedTaskAfterSend.appPushMessages[1].msgid, "linked-2");
+    assert.equal(linkedTaskAfterSend.appPushMessages[1].targetRole, "requester");
+    assert.equal(linkedMessages[0].targetUserId, "assignee");
     assert.equal(linkedMessages[0].messageType, "template_card");
     const linkedCard = linkedMessages[0].templateCard;
     assert.equal(linkedCard.button_selection, undefined);
@@ -609,6 +619,54 @@ async function main() {
     assert.equal(linkedDetail.url.includes("wd_linked_reminder"), false);
     assert.equal(linkedDetail.url.includes("legacy-feedback-token"), false);
     assert.equal(linkedCard.horizontal_content_list.some((item) => item.keyname === "当前情况说明"), false);
+    const requesterNewMessage = linkedMessages[1];
+    assert.equal(requesterNewMessage.targetUserId, "requester");
+    assert.equal(requesterNewMessage.purpose, "watchdog_requester_status_new");
+    assert.equal(requesterNewMessage.templateCard.source.desc, "NEW · EA盯梢");
+    assert.equal(requesterNewMessage.templateCard.source.desc_color, 2);
+    assert.deepEqual(requesterNewMessage.templateCard.button_list, [
+      { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
+    ]);
+    assert.deepEqual(
+      requesterNewMessage.templateCard.horizontal_content_list.map((item) => item.keyname),
+      ["被盯梢人", "盯梢时间", "任务ID", "详情"]
+    );
+    assert.equal(
+      linkedTaskAfterSend.appPushMessages[1].linkedCardTaskId,
+      linkedCard.task_id
+    );
+
+    const receivedResult = await linkedReminderWatchdog.handleTemplateCardEvent({
+      taskId: linkedCard.task_id,
+      eventKey: "ea_watch_card_received",
+      selectedItems: []
+    }, {
+      userId: "assignee",
+      source: "wecom-app-native"
+    });
+    assert.equal(receivedResult.handled, true);
+    assert.deepEqual(receivedResult.syncRequesterNewState, {
+      taskId: "wd_linked_reminder",
+      cardTaskId: linkedCard.task_id
+    });
+    const requesterSyncResult = await linkedReminderWatchdog.syncAppReminderCardReadState(
+      receivedResult.syncRequesterNewState
+    );
+    assert.equal(requesterSyncResult.ok, true);
+    assert.deepEqual(linkedRecalledMessageIds, ["linked-2"]);
+    const requesterReadMessage = linkedMessages[2];
+    assert.equal(requesterReadMessage.targetUserId, "requester");
+    assert.equal(requesterReadMessage.purpose, "watchdog_requester_status_received");
+    assert.equal(requesterReadMessage.templateCard.source.desc, "EA盯梢");
+    assert.equal(requesterReadMessage.templateCard.source.desc_color, 1);
+    assert.equal(requesterReadMessage.templateCard.source.desc.includes("NEW"), false);
+    const linkedTaskAfterSync = taskById(linkedReminderStoreFile, "wd_linked_reminder");
+    const requesterNewRecord = linkedTaskAfterSync.appPushMessages.find((item) => item.msgid === "linked-2");
+    const requesterReadRecord = linkedTaskAfterSync.appPushMessages.find((item) => item.msgid === "linked-3");
+    assert.equal(requesterNewRecord.receiptSyncStatus, "synced");
+    assert.equal(requesterNewRecord.replacementMessageId, "linked-3");
+    assert.equal(requesterReadRecord.readState, "received");
+    assert.equal(requesterReadRecord.linkedCardTaskId, linkedCard.task_id);
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
     assert.match(feedbackPageScript, /window\.location\.hash/);

@@ -45,6 +45,7 @@ const MAX_APP_DELIVERIES_DURING_ROBOT_BACKOFF = 20;
 const MAX_APP_CARD_RECEIPT_EVENTS_PER_TASK = 200;
 const MAX_APP_PUSH_MESSAGE_RECORDS_PER_TASK = 24;
 const WECOM_APP_MESSAGE_RECALL_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_APP_REQUESTER_RECEIPT_SYNCS_PER_TICK = 10;
 const APP_SITUATION_QUESTION_KEY = "ea_watch_situation";
 const APP_SITUATION_OPTIONS = Object.freeze([
   { id: "none", text: "无补充", note: "" },
@@ -2769,6 +2770,47 @@ function createWatchdogModule(options = {}) {
     return card;
   }
 
+  function appRequesterReminderCard(task, tipType, options = {}) {
+    const feedbackUrl = appFeedbackUrlForTask(task);
+    const received = Boolean(options.received);
+    const cardTaskId = normalizeText(options.cardTaskId)
+      || `ea_watch_control_${task.id}_${Date.now()}`;
+    const remark = taskRemarkText(task);
+    const contents = [
+      { keyname: "被盯梢人", value: task.assigneeName || task.assigneeUserId || "未知" },
+      { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) },
+      watchdogTaskIdCardItem(task)
+    ].filter(Boolean);
+    if (feedbackUrl) {
+      contents.push({
+        keyname: "详情",
+        value: "查看盯梢详情",
+        type: 1,
+        url: feedbackUrl
+      });
+    }
+    return {
+      card_type: "button_interaction",
+      source: {
+        desc: received ? "EA盯梢" : "NEW · EA盯梢",
+        desc_color: received ? 1 : 2
+      },
+      main_title: {
+        title: truncate(task.content, 60),
+        desc: ""
+      },
+      ...(remark ? { sub_title_text: truncate(`备注：${remark}`, 160) } : {}),
+      card_action: feedbackUrl
+        ? { type: 1, url: feedbackUrl }
+        : { type: 1, url: "https://work.weixin.qq.com" },
+      horizontal_content_list: contents,
+      button_list: [
+        { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
+      ],
+      task_id: cardTaskId
+    };
+  }
+
   function appReminderTaskIdFromCardTaskId(cardTaskId) {
     if (isWatchdogInitialTaskId(cardTaskId)) {
       return parseWatchdogInitialCardTaskId(cardTaskId);
@@ -2853,6 +2895,10 @@ function createWatchdogModule(options = {}) {
     return {
       handled: true,
       task,
+      syncRequesterNewState: {
+        taskId: task.id,
+        cardTaskId: summary.taskId
+      },
       updateCard: appNativeReminderCard(
         task,
         appReminderTipTypeFromCard(task, summary.taskId),
@@ -2888,7 +2934,12 @@ function createWatchdogModule(options = {}) {
       msgid,
       sentAt: normalizeText(message.sentAt),
       tipType: normalizeText(message.tipType),
-      messageType: normalizeText(message.messageType)
+      messageType: normalizeText(message.messageType),
+      targetRole: normalizeText(message.targetRole),
+      cardTaskId: normalizeText(message.cardTaskId),
+      linkedCardTaskId: normalizeText(message.linkedCardTaskId),
+      readState: normalizeText(message.readState),
+      replacesMessageId: normalizeText(message.replacesMessageId)
     };
     if (existing) {
       Object.assign(existing, next);
@@ -2896,6 +2947,202 @@ function createWatchdogModule(options = {}) {
       records.push(next);
     }
     task.appPushMessages = records.slice(-MAX_APP_PUSH_MESSAGE_RECORDS_PER_TASK);
+  }
+
+  function requesterMirrorRecordForCard(task, assigneeCardTaskId) {
+    const cardTaskId = normalizeText(assigneeCardTaskId);
+    if (!cardTaskId) {
+      return null;
+    }
+    const records = Array.isArray(task.appPushMessages) ? task.appPushMessages : [];
+    return records.slice().reverse().find((item) => (
+      item
+      && normalizeText(item.targetRole) === "requester"
+      && normalizeText(item.linkedCardTaskId) === cardTaskId
+      && !normalizeText(item.replacesMessageId)
+    )) || null;
+  }
+
+  function setRequesterReceiptSyncFailure(task, record, error) {
+    const info = errorInfo(error, "发起人盯梢卡 New 状态同步失败");
+    const failedAt = new Date().toISOString();
+    const retryAt = new Date(Date.now() + config.appPush.failureBackoffMs).toISOString();
+    record.receiptSyncStatus = "pending";
+    record.receiptSyncLastFailedAt = failedAt;
+    record.receiptSyncRetryAt = retryAt;
+    record.receiptSyncLastError = info.message;
+    task.appRequesterReceiptSyncLastError = info.message;
+    task.appRequesterReceiptSyncRetryAt = retryAt;
+    task.updatedAt = failedAt;
+    save();
+    if (logger && typeof logger.warn === "function") {
+      logger.warn("Watchdog requester card New state sync queued", {
+        taskId: task.id,
+        assigneeCardTaskId: normalizeText(record.linkedCardTaskId),
+        requesterCardTaskId: normalizeText(record.cardTaskId),
+        requesterMessageIdConfigured: Boolean(record.msgid),
+        recalled: Boolean(record.recalledAt),
+        retryAt,
+        errcode: info.errcode,
+        errmsg: info.errmsg,
+        message: info.message
+      });
+    }
+    return { ok: false, queued: true, retryAt, error: info.message };
+  }
+
+  async function syncAppReminderCardReadState(input = {}) {
+    const cardTaskId = normalizeText(input.cardTaskId);
+    const id = normalizeText(input.taskId) || appReminderTaskIdFromCardTaskId(cardTaskId);
+    const task = id ? findTask(id) : null;
+    if (!task || !cardTaskId) {
+      return { ok: false, skipped: true, reason: "task_or_card_missing" };
+    }
+    const receiptRecorded = Array.isArray(task.appCardReceiptEvents)
+      && task.appCardReceiptEvents.some((item) => item && normalizeText(item.cardTaskId) === cardTaskId);
+    if (!receiptRecorded) {
+      return { ok: false, skipped: true, reason: "receipt_not_recorded" };
+    }
+    const record = requesterMirrorRecordForCard(task, cardTaskId);
+    if (!record) {
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog requester card New state sync skipped", {
+          taskId: task.id,
+          assigneeCardTaskId: cardTaskId,
+          reason: "requester_mirror_not_found"
+        });
+      }
+      return { ok: false, skipped: true, reason: "requester_mirror_not_found" };
+    }
+    if (record.receiptSyncStatus === "synced" && normalizeText(record.replacementMessageId)) {
+      return { ok: true, duplicate: true, replacementMessageId: record.replacementMessageId };
+    }
+    if (!appNotifier || typeof appNotifier.recallMessage !== "function" || typeof appNotifier.send !== "function") {
+      return setRequesterReceiptSyncFailure(task, record, new Error("企业微信自建应用发送器不支持撤回并补发卡片"));
+    }
+
+    record.receiptSyncRequestedAt = record.receiptSyncRequestedAt || new Date().toISOString();
+    record.receiptSyncStatus = "syncing";
+    save();
+    if (!normalizeText(record.recalledAt)) {
+      const sentAtMs = dateValueMs(record.sentAt);
+      if (sentAtMs && Date.now() - sentAtMs > WECOM_APP_MESSAGE_RECALL_WINDOW_MS) {
+        record.receiptSyncStatus = "expired";
+        record.receiptSyncRetryAt = "";
+        record.receiptSyncLastError = "发起人原卡已超过企业微信 24 小时撤回期限";
+        task.appRequesterReceiptSyncLastError = record.receiptSyncLastError;
+        task.appRequesterReceiptSyncRetryAt = "";
+        save();
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("Watchdog requester card New state sync expired", {
+            taskId: task.id,
+            assigneeCardTaskId: cardTaskId,
+            requesterCardTaskId: normalizeText(record.cardTaskId),
+            sentAt: normalizeText(record.sentAt),
+            recallWindowHours: WECOM_APP_MESSAGE_RECALL_WINDOW_MS / (60 * 60 * 1000)
+          });
+        }
+        return { ok: false, skipped: true, reason: "requester_card_recall_expired" };
+      }
+      try {
+        const recalled = await appNotifier.recallMessage({
+          msgid: record.msgid,
+          purpose: "watchdog_requester_new_state_sync"
+        });
+        if (!recalled || !recalled.ok) {
+          throw new Error((recalled && recalled.reason) || "企业微信发起人盯梢卡撤回失败");
+        }
+        record.recalledAt = new Date().toISOString();
+        record.recallPurpose = "requester_new_state_sync";
+        save();
+      } catch (error) {
+        return setRequesterReceiptSyncFailure(task, record, error);
+      }
+    }
+
+    try {
+      const replacementCard = appRequesterReminderCard(task, record.tipType, { received: true });
+      const result = await appNotifier.send({
+        targetUserId: task.requesterUserId,
+        purpose: "watchdog_requester_status_received",
+        messageType: "template_card",
+        templateCard: replacementCard
+      });
+      if (!result || !result.ok || !normalizeText(result.msgid)) {
+        throw new Error((result && result.reason) || "企业微信发起人已读盯梢卡补发失败或缺少消息 ID");
+      }
+      const syncedAt = new Date().toISOString();
+      record.receiptSyncStatus = "synced";
+      record.receiptSyncAt = syncedAt;
+      record.receiptSyncRetryAt = "";
+      record.receiptSyncLastError = "";
+      record.replacementMessageId = result.msgid || "";
+      rememberAppPushMessage(task, {
+        msgid: result.msgid || "",
+        sentAt: syncedAt,
+        tipType: record.tipType,
+        messageType: "template_card",
+        targetRole: "requester",
+        cardTaskId: replacementCard.task_id,
+        linkedCardTaskId: cardTaskId,
+        readState: "received",
+        replacesMessageId: record.msgid
+      });
+      task.appRequesterReceiptSyncLastError = "";
+      task.appRequesterReceiptSyncRetryAt = "";
+      task.appRequesterLastReadAt = syncedAt;
+      task.appRequesterLastReadMessageId = result.msgid || "";
+      if (normalizeText(task.controlCardTaskId) === normalizeText(record.cardTaskId)) {
+        task.controlCardTaskId = replacementCard.task_id;
+        task.controlCardSentAt = syncedAt;
+        task.controlCardChannel = "wecom-app";
+      }
+      task.updatedAt = syncedAt;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog requester card New state synced", {
+          taskId: task.id,
+          assigneeCardTaskId: cardTaskId,
+          requesterCardTaskId: normalizeText(record.cardTaskId),
+          replacementCardTaskId: replacementCard.task_id,
+          recalled: Boolean(record.recalledAt),
+          replacementMessageIdConfigured: Boolean(result.msgid)
+        });
+      }
+      return { ok: true, syncedAt, replacementMessageId: result.msgid || "" };
+    } catch (error) {
+      return setRequesterReceiptSyncFailure(task, record, error);
+    }
+  }
+
+  async function retryPendingRequesterReceiptSyncs(nowMs) {
+    const candidates = [];
+    for (const task of state.tasks) {
+      const records = Array.isArray(task.appPushMessages) ? task.appPushMessages : [];
+      for (const record of records) {
+        if (!record || record.receiptSyncStatus !== "pending") continue;
+        const retryAtMs = dateValueMs(record.receiptSyncRetryAt);
+        if (retryAtMs && retryAtMs > nowMs) continue;
+        candidates.push({ task, record });
+      }
+    }
+    candidates.sort((left, right) => dateValueMs(left.record.receiptSyncRequestedAt) - dateValueMs(right.record.receiptSyncRequestedAt));
+    let syncedCount = 0;
+    for (const item of candidates.slice(0, MAX_APP_REQUESTER_RECEIPT_SYNCS_PER_TICK)) {
+      const result = await syncAppReminderCardReadState({
+        taskId: item.task.id,
+        cardTaskId: item.record.linkedCardTaskId
+      });
+      if (result.ok) syncedCount += 1;
+    }
+    if (candidates.length > 0 && logger && typeof logger.info === "function") {
+      logger.info("Watchdog requester card New state retry processed", {
+        candidateCount: candidates.length,
+        attemptedCount: Math.min(candidates.length, MAX_APP_REQUESTER_RECEIPT_SYNCS_PER_TICK),
+        syncedCount
+      });
+    }
+    return syncedCount;
   }
 
   function appPushRecallRecords(task) {
@@ -2998,6 +3245,87 @@ function createWatchdogModule(options = {}) {
     return summary;
   }
 
+  async function trySendRequesterReminderMirror(task, tipType, assigneeCardTaskId) {
+    const requesterUserId = normalizeText(task.requesterUserId);
+    const assigneeUserId = normalizeText(task.assigneeUserId);
+    if (!requesterUserId || requesterUserId === assigneeUserId || !appPushNativeCardReady()) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: !requesterUserId
+          ? "requester_user_id_missing"
+          : (requesterUserId === assigneeUserId ? "same_requester_and_assignee" : "native_card_not_ready")
+      };
+    }
+    const card = appRequesterReminderCard(task, tipType);
+    try {
+      const result = await appNotifier.send({
+        targetUserId: requesterUserId,
+        purpose: "watchdog_requester_status_new",
+        messageType: "template_card",
+        templateCard: card
+      });
+      if (!result || !result.ok || !normalizeText(result.msgid)) {
+        throw new Error((result && result.reason) || "企业微信发起人盯梢状态卡发送失败或缺少消息 ID");
+      }
+      const sentAt = new Date().toISOString();
+      rememberAppPushMessage(task, {
+        msgid: result.msgid || "",
+        sentAt,
+        tipType,
+        messageType: "template_card",
+        targetRole: "requester",
+        cardTaskId: card.task_id,
+        linkedCardTaskId: assigneeCardTaskId,
+        readState: "new"
+      });
+      task.appRequesterLastCardTaskId = card.task_id;
+      task.appRequesterLastMessageId = result.msgid || "";
+      task.appRequesterLastSentAt = sentAt;
+      task.appRequesterLastError = "";
+      if (tipType === "watchdog_initial" && !task.controlCardSentAt) {
+        task.controlCardTaskId = card.task_id;
+        task.controlCardSentAt = sentAt;
+        task.controlCardChannel = "wecom-app";
+        task.controlCardRetryAt = "";
+        task.controlCardQueuedAt = "";
+        task.controlCardLastError = "";
+      }
+      task.updatedAt = sentAt;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog requester New state card sent", {
+          taskId: task.id,
+          tipType,
+          assigneeCardTaskId,
+          requesterCardTaskId: card.task_id,
+          requesterUserId,
+          msgid: result.msgid || ""
+        });
+      }
+      return { ok: true, sentAt, msgid: result.msgid || "", cardTaskId: card.task_id };
+    } catch (error) {
+      const info = errorInfo(error, "企业微信发起人盯梢状态卡发送失败");
+      task.appRequesterLastError = info.message;
+      task.appRequesterLastFailedAt = new Date().toISOString();
+      task.updatedAt = task.appRequesterLastFailedAt;
+      save();
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Watchdog requester New state card send failed", {
+          taskId: task.id,
+          tipType,
+          assigneeCardTaskId,
+          requesterUserId,
+          errcode: info.errcode,
+          errmsg: info.errmsg,
+          message: info.message,
+          assigneeDeliveryKept: true
+        });
+      }
+      return { ok: false, error: info.message, errcode: info.errcode };
+    }
+  }
+
   async function trySendWatchdogAppPush(task, tipType) {
     if (!isAppPushRequested()) {
       return {
@@ -3040,23 +3368,35 @@ function createWatchdogModule(options = {}) {
       task.appPushLastSentAt = sentAt;
       task.appPushLastMessageType = tipType;
       task.appPushLastMessageId = result.msgid || "";
+      const assigneeCardTaskId = payload.templateCard && payload.templateCard.task_id
+        ? payload.templateCard.task_id
+        : "";
       rememberAppPushMessage(task, {
         msgid: result.msgid || "",
         sentAt,
         tipType,
-        messageType: payload.messageType || "text"
+        messageType: payload.messageType || "text",
+        targetRole: "assignee",
+        cardTaskId: assigneeCardTaskId,
+        readState: assigneeCardTaskId ? "new" : ""
       });
       task.appPushLastError = "";
       task.lastReminderChannel = "wecom-app";
       task.updatedAt = sentAt;
       save();
+      const requesterMirror = assigneeCardTaskId
+        ? await trySendRequesterReminderMirror(task, tipType, assigneeCardTaskId)
+        : { ok: false, skipped: true, reason: "assignee_card_task_id_missing" };
       if (logger && typeof logger.info === "function") {
         logger.info("Watchdog app push sent", {
           taskId: task.id,
           tipType,
           targetUserId: task.assigneeUserId,
           msgid: result.msgid || "",
-          appPushCount: task.appPushCount
+          appPushCount: task.appPushCount,
+          requesterMirrorSent: Boolean(requesterMirror && requesterMirror.ok),
+          requesterMirrorSkipped: Boolean(requesterMirror && requesterMirror.skipped),
+          requesterMirrorReason: requesterMirror && (requesterMirror.reason || requesterMirror.error) || ""
         });
         if (payload.messageType !== "template_card") {
           logger.warn("Watchdog app reminder sent without feedback link because native callback is not ready", {
@@ -3070,7 +3410,8 @@ function createWatchdogModule(options = {}) {
         ok: true,
         sentAt,
         msgid: result.msgid || "",
-        channel: "wecom-app"
+        channel: "wecom-app",
+        requesterMirror
       };
     } catch (error) {
       const info = errorInfo(error, "企业微信自建应用盯梢推送失败");
@@ -3977,6 +4318,15 @@ function createWatchdogModule(options = {}) {
   }
 
   async function sendControlCardQuietly(task) {
+    if (task.controlCardSentAt && task.controlCardChannel === "wecom-app") {
+      return {
+        sent: true,
+        queued: false,
+        mirrored: true,
+        retryAt: "",
+        error: ""
+      };
+    }
     if (!task.requesterTargetId) {
       return {
         sent: false,
@@ -4737,6 +5087,7 @@ function createWatchdogModule(options = {}) {
       const backoffMs = config.sendQueue.enabled ? sendQueueRemainingMs(now) : 0;
       const appPushActive = isAppPushRequested();
       await retryPendingAppResultNotices(now);
+      await retryPendingRequesterReceiptSyncs(now);
       if (backoffMs > 0 && !appPushActive) {
         if (logger && typeof logger.info === "function" && now - lastBackoffLogAt >= 60 * 1000) {
           lastBackoffLogAt = now;
@@ -6494,6 +6845,11 @@ function createWatchdogModule(options = {}) {
       oneTimeCount: state.tasks.filter((task) => task.status === "active" && isOneTimeTask(task)).length,
       awaitingRescheduleCount: state.tasks.filter((task) => task.status === "active" && task.awaitingRescheduleFrom).length,
       pendingAppResultNoticeCount: state.tasks.filter((task) => Boolean(pendingAppResultNoticeForTask(task, now))).length,
+      pendingRequesterReceiptSyncCount: state.tasks.reduce((count, task) => (
+        count + (Array.isArray(task.appPushMessages)
+          ? task.appPushMessages.filter((item) => item && item.receiptSyncStatus === "pending").length
+          : 0)
+      ), 0),
       deduplicatedBacklogCount: state.tasks.filter((task) => task.canceledVia === "dedupe_backlog").length,
       queuedControlCardCount: activeTasks().filter((task) => needsControlCardRetry(task)).length,
       pendingControlCardRetryCount: pendingControlCardRetryTasks(Date.now()).length,
@@ -6538,6 +6894,7 @@ function createWatchdogModule(options = {}) {
     stop,
     tick,
     handleTemplateCardEvent,
+    syncAppReminderCardReadState,
     capturePendingTextMessage,
     sendAppPushTest,
     getAppFeedbackTask,
