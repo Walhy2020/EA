@@ -114,6 +114,30 @@ assert.deepStrictEqual(
 
 assert.strictEqual(gaowenshengItems.length, 2);
 assert.strictEqual(hujinnanItems.length, 1);
+assert.deepStrictEqual(
+  comparable(__test.mergeRequiredFieldViewItems([
+    {
+      recordId: "r-flat-a",
+      demandId: "D-FLAT-A",
+      missingFields: ["字段 A"]
+    },
+    {
+      recordId: "r-flat-b",
+      demandId: "D-FLAT-B",
+      missingFields: ["字段 B"]
+    },
+    {
+      recordId: "r-flat-a",
+      demandId: "D-FLAT-A",
+      missingFields: ["字段 C"]
+    }
+  ])),
+  [
+    { recordId: "r-flat-a", demandId: "D-FLAT-A", missingFields: ["字段 A", "字段 C"] },
+    { recordId: "r-flat-b", demandId: "D-FLAT-B", missingFields: ["字段 B"] }
+  ],
+  "顶层 recordId 的 H5 任务必须按需求合并，不能全部折叠为一条"
+);
 console.log(JSON.stringify({
   passed: true,
   checks: {
@@ -121,6 +145,7 @@ console.log(JSON.stringify({
     fallbackViewerMatchesOtherLeaderFieldScope: true,
     multiLeaderUsesFieldScopeUnion: true,
     duplicateDemandMergesMissingFields: true,
+    flattenedH5ItemsKeepDistinctDemands: true,
     noSelectionKeepsFallbackResidualItems: true,
     projectFilterKeepsLeaderParity: true
   }

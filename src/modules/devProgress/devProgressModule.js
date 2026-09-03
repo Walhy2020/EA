@@ -566,7 +566,15 @@ function uniqueMerge(values) {
 
 function requiredFieldMergeKey(item = {}) {
   const task = item.task || {};
-  return String(task.recordId || task.demandId || `${task.project || ""}|${task.demand || ""}`).trim();
+  const project = item.project || task.project || "";
+  const demand = item.demand || task.demand || "";
+  return String(
+    item.recordId
+    || item.demandId
+    || task.recordId
+    || task.demandId
+    || (project || demand ? `${project}|${demand}` : "")
+  ).trim();
 }
 
 function h5TaskKey(item = {}) {
@@ -610,6 +618,13 @@ function mergeRequiredFieldItem(items, nextItem) {
     nextItem.originalOwnerName
   ]).join("、");
   existing.isFallbackOwner = Boolean(existing.isFallbackOwner || nextItem.isFallbackOwner);
+}
+
+function mergeRequiredFieldViewItems(items = []) {
+  return items.reduce((result, item) => {
+    mergeRequiredFieldItem(result, item);
+    return result;
+  }, []);
 }
 
 function roleLeaderNameMapFromWorkflowRules(workflowRules = {}) {
@@ -2857,10 +2872,7 @@ function createDevProgressModule(options = {}) {
     const directOwnerItems = fallbackOnly ? [] : ownerItems;
     const items = fallbackOnly
       ? [...fallbackLeaderItems, ...fallbackResidualItems]
-      : [...directOwnerItems, ...leaderItems].reduce((result, item) => {
-        mergeRequiredFieldItem(result, item);
-        return result;
-      }, []);
+      : mergeRequiredFieldViewItems([...directOwnerItems, ...leaderItems]);
 
     if (logger && typeof logger.info === "function") {
       logger.info("Dev progress required-field access evaluated", {
@@ -3510,6 +3522,7 @@ module.exports = {
     requiredFieldItemForLeaderScope,
     requiredFieldLeaderViewItems,
     fallbackLeaderViewItems,
+    mergeRequiredFieldViewItems,
     leaderRequiredFieldSetForPerson,
     canReadRequiredFieldFallbackScope,
     requiredFieldFallbackViewerNames,
