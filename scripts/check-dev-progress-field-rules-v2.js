@@ -51,7 +51,7 @@ assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
 assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
 assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 39);
-assert.strictEqual(normalizedFromSettings.sourceVersion, "V0003");
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0004");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
@@ -68,8 +68,8 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "3.0.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0003");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "4.0.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0004");
 assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
 assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 39);
 
@@ -85,6 +85,45 @@ assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus ===
 assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "待上线").length, 9);
 assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "已更新但未验收").length, 7);
 assert.ok(requiredFields.fieldRules.every((rule) => rule.monitorGroups.length > 0));
+
+const v0004BugExcludedFields = [
+  "UI人员",
+  "UI需求",
+  "动效需求",
+  "动效人员",
+  "UI进度",
+  "UI耗时",
+  "UI日方时间",
+  "UI剩余时间",
+  "监修时间",
+  "UI开始时间",
+  "UI完成时间",
+  "特效制作耗时",
+  "特效制作剩余",
+  "动作制作耗时",
+  "动作制作剩余",
+  "动效制作交付日期"
+];
+for (const fieldName of v0004BugExcludedFields) {
+  const rule = requiredFields.fieldRules.find((item) => item.field === fieldName);
+  assert.deepStrictEqual(rule.excludedDemandTypes, ["bug", "配置bug"], `${fieldName} V0004 排除类型不一致`);
+  assert.strictEqual(fieldDecisions(fieldName, {
+    UI需求: "需要UI",
+    动效需求: "需要动效"
+  }, { demandType: "bug", status: "实现中" }).length, 0, `${fieldName} 不应检查 bug`);
+  assert.strictEqual(fieldDecisions(fieldName, {
+    UI需求: "需要UI",
+    动效需求: "需要动效"
+  }, { demandType: "配置bug", status: "实现中" }).length, 0, `${fieldName} 不应检查配置bug`);
+}
+assert.ok(fieldDecisions("UI人员", { UI需求: "需要UI" }, {
+  demandType: "新功能",
+  status: "实现中"
+}).some((item) => item.missing));
+assert.ok(fieldDecisions("动效进度", {
+  动效需求: "需要动效",
+  动效进度: ""
+}, { demandType: "bug", status: "实现中" }).some((item) => item.missing));
 
 const configuredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
 assert.ok(configuredFields.has("监修时间"));

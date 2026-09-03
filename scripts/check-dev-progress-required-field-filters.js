@@ -35,8 +35,8 @@ assert.ok(monitoredFields.has("特效制作耗时"));
 assert.ok(monitoredFields.has("特效制作剩余"));
 assert.ok(monitoredFields.has("动作制作耗时"));
 assert.ok(monitoredFields.has("动作制作剩余"));
-assert.strictEqual(requiredFields.sourceVersion, "V0003");
-assert.strictEqual(requiredFields.version, "3.0.0");
+assert.strictEqual(requiredFields.sourceVersion, "V0004");
+assert.strictEqual(requiredFields.version, "4.0.0");
 assert.deepStrictEqual(requiredFields.statusGroups, {
   "开发中监控": ["待分配", "规划中", "实现中"],
   "验收中监控": ["内网验收中", "验收后bug修改中", "内网测试中", "测试2验收中", "测试2测试中", "测试1验收/测试中", "测试阻塞"],
@@ -49,5 +49,14 @@ assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus ===
 assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "待上线").length, 9);
 assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "已更新但未验收").length, 7);
 assert.ok(requiredFields.fieldRules.every((rule) => rule.monitorGroups.length > 0));
+
+for (const fieldName of [
+  "UI人员", "UI需求", "动效需求", "动效人员", "UI进度", "UI耗时", "UI日方时间", "UI剩余时间",
+  "监修时间", "UI开始时间", "UI完成时间", "特效制作耗时", "特效制作剩余", "动作制作耗时",
+  "动作制作剩余", "动效制作交付日期"
+]) {
+  const rule = requiredFields.fieldRules.find((item) => item.field === fieldName);
+  assert.deepStrictEqual(rule.excludedDemandTypes, ["bug", "配置bug"], `${fieldName} must exclude V0004 bug types`);
+}
 
 console.log("Dev progress legacy required-field filters are disabled");

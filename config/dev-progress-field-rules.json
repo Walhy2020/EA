@@ -1,7 +1,7 @@
 {
-  "version": "3.0.0",
+  "version": "4.0.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0003",
+  "sourceVersion": "V0004",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -179,6 +179,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -334,6 +338,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "leaderRole": "UI组长",
       "memberFields": [
         "策划人员"
@@ -347,6 +355,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "leaderRole": "动效组长",
       "memberFields": [
         "策划人员"
@@ -360,6 +372,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "leaderRole": "动效组长",
       "memberFields": [
         "策划人员"
@@ -373,6 +389,10 @@
       "startStatus": "实现中",
       "endStatus": "待上线",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -504,6 +524,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -537,6 +561,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -566,6 +594,10 @@
       "startStatus": "实现中",
       "endStatus": "待上线",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -605,6 +637,10 @@
       "field": "监修时间",
       "startStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "any": [
           {
@@ -647,6 +683,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -667,6 +707,10 @@
       "startStatus": "实现中",
       "endStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "UI需求",
         "notEquals": [
@@ -915,6 +959,10 @@
       "field": "特效制作耗时",
       "startStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "动效需求",
         "notEquals": [
@@ -935,6 +983,10 @@
       "field": "特效制作剩余",
       "startStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "动效需求",
         "notEquals": [
@@ -975,6 +1027,10 @@
       "field": "动作制作耗时",
       "startStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "动效需求",
         "notEquals": [
@@ -995,6 +1051,10 @@
       "field": "动作制作剩余",
       "startStatus": "实现中",
       "required": true,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "动效需求",
         "notEquals": [
@@ -1035,6 +1095,10 @@
       "field": "动效制作交付日期",
       "startStatus": "实现中",
       "required": false,
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
+      ],
       "when": {
         "field": "动效需求",
         "notEquals": [

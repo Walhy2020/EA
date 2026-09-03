@@ -66,5 +66,20 @@ assert.strictEqual(fieldIsMissing("监修时间", "新功能", "实现中", {
   UI需求: "-",
   动效需求: "-"
 }), false);
+assert.strictEqual(fieldIsMissing("UI人员", "bug", "实现中", {
+  UI需求: "需要UI"
+}), false);
+assert.strictEqual(fieldIsMissing("UI人员", "配置bug", "实现中", {
+  UI需求: "需要UI"
+}), false);
+assert.strictEqual(fieldIsMissing("UI人员", "新功能", "实现中", {
+  UI需求: "需要UI"
+}), true);
+assert.strictEqual(fieldIsMissing("特效制作剩余", "bug", "实现中", {
+  动效需求: "需要动效"
+}), false);
+assert.strictEqual(fieldIsMissing("动效进度", "bug", "实现中", {
+  动效需求: "需要动效"
+}), true);
 
 console.log("Dev progress field-rule activation checks passed.");
