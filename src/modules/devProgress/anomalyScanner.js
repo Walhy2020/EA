@@ -385,6 +385,16 @@ function fieldRuleIsActive(record, fieldRule, requiredRule) {
   if (globalExcluded.includes(demandType) || ruleExcluded.includes(demandType)) {
     return false;
   }
+  const monitorGroups = normalizedArray(fieldRule.monitorGroups || []);
+  if (monitorGroups.length > 0) {
+    const statusGroups = requiredRule.statusGroups && typeof requiredRule.statusGroups === "object"
+      ? requiredRule.statusGroups
+      : {};
+    const monitoredStatuses = uniqueValues(monitorGroups.flatMap((groupName) => statusGroups[groupName] || []));
+    if (!monitoredStatuses.includes(status)) {
+      return false;
+    }
+  }
   return statusRangeMatches(
     status,
     fieldRule.startStatus,

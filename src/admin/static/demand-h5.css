@@ -816,6 +816,7 @@ textarea:focus {
 }
 
 .draft-list-item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -829,6 +830,73 @@ textarea:focus {
   background: var(--surface);
   box-shadow: var(--shadow);
   text-align: left;
+  cursor: pointer;
+}
+
+.draft-list-item.has-task-id-copy {
+  padding-right: 50px;
+}
+
+.task-id-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #7d848c;
+  background: #f1f2f3;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.task-id-copy-button:hover {
+  color: #555c64;
+  background: #e7e9eb;
+}
+
+.task-id-copy-button:focus-visible {
+  outline: 2px solid var(--focus-ring-strong);
+  outline-offset: 2px;
+}
+
+.task-id-copy-icon {
+  position: relative;
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.task-id-copy-icon::before,
+.task-id-copy-icon::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  background: #f1f2f3;
+}
+
+.task-id-copy-icon::before {
+  top: 1px;
+  left: 1px;
+}
+
+.task-id-copy-icon::after {
+  right: 1px;
+  bottom: 1px;
+}
+
+.task-id-copy-button:hover .task-id-copy-icon::before,
+.task-id-copy-button:hover .task-id-copy-icon::after {
+  background: #e7e9eb;
 }
 
 .draft-list-item:focus-visible {

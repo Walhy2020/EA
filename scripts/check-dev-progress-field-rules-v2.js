@@ -51,14 +51,16 @@ assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
 assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
 assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 39);
-assert.strictEqual(normalizedFromSettings.sourceVersion, "V0002");
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0003");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
 assert.strictEqual(fieldDecisions("需求名称", {}, { status: "待分配" }).length, 0);
 assert.ok(fieldDecisions("需求名称", {}, { status: "规划中" }).some((item) => item.missing));
 assert.strictEqual(fieldDecisions("需求名称", {}, { status: "设计中" }).length, 0);
-assert.strictEqual(decisions({}, { status: "测试阻塞" }).length, 0);
+assert.ok(fieldDecisions("需求名称", {}, { status: "测试阻塞" }).some((item) => item.missing));
+assert.strictEqual(decisions({}, { status: "已拒绝" }).length, 0);
+assert.strictEqual(decisions({}, { status: "暂停中" }).length, 0);
 assert.strictEqual(decisions({}, { demandType: "任务拆分" }).length, 0);
 assert.ok(fieldDecisions("规模类型", {}, { status: "规划中" }).some((item) => item.missing));
 
@@ -66,10 +68,23 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "2.3.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0002");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "3.0.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0003");
 assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
 assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 39);
+
+assert.deepStrictEqual(requiredFields.statusGroups, {
+  "开发中监控": ["待分配", "规划中", "实现中"],
+  "验收中监控": ["内网验收中", "验收后bug修改中", "内网测试中", "测试2验收中", "测试2测试中", "测试1验收/测试中", "测试阻塞"],
+  "验收完-更新前监控": ["测试服全完成", "上线前整备", "待上线"],
+  "更新完成后监控": ["已上线", "需跟进上限后效果", "待复盘", "已更新但未验收"],
+  "其他阻塞阶段": ["已拒绝", "暂停中"]
+});
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "实现中").length, 20);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "测试阻塞").length, 3);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "待上线").length, 9);
+assert.strictEqual(requiredFields.fieldRules.filter((rule) => rule.endStatus === "已更新但未验收").length, 7);
+assert.ok(requiredFields.fieldRules.every((rule) => rule.monitorGroups.length > 0));
 
 const configuredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
 assert.ok(configuredFields.has("监修时间"));
@@ -90,9 +105,13 @@ assert.ok(fieldDecisions("规模类型", {}, { status: "规划中" }).some((item
 assert.ok(fieldDecisions("规模类型", {}, { status: "实现中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("规模类型", {}, { status: "内网验收中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("规模类型", {}, { status: "已上线" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "需跟进上限后效果" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "待复盘" }).some((item) => item.missing));
+assert.ok(fieldDecisions("规模类型", {}, { status: "已更新但未验收" }).some((item) => item.missing));
 assert.ok(fieldDecisions("需求名称", {}, { status: "内网验收中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("测试人员", {}, { status: "内网验收中" }).some((item) => item.missing));
 assert.ok(fieldDecisions("测试人员", {}, { status: "测试服全完成" }).some((item) => item.missing));
+assert.ok(fieldDecisions("测试人员", {}, { status: "待上线" }).some((item) => item.missing));
 assert.strictEqual(fieldDecisions("测试人员", {}, { status: "已上线" }).length, 0);
 
 const noUiCascade = decisions({ UI需求: "" });
@@ -195,13 +214,19 @@ assert.strictEqual(fieldDecisions("前端剩余", {
   前端剩余: "1",
   开发截止日期: "2026-09-03"
 }, { status: "测试服全完成" }, { today: new Date(2026, 7, 31), workdayDates }).length, 0);
+assert.ok(fieldDecisions("前端剩余", {
+  前端开发: "赵鹏",
+  前端剩余: "1",
+  开发截止日期: "2026-09-03"
+}, { status: "测试阻塞" }, { today: new Date(2026, 7, 31), workdayDates })
+  .every((item) => item.missing && item.reason === "number_above_maximum"));
 
 const uiProgressDuringDevelopment = fieldDecisions("UI进度", {
   UI需求: "需要UI",
   UI进度: "待分配"
 }, { status: "实现中" });
 assert.ok(uiProgressDuringDevelopment.every((item) => !item.missing));
-for (const status of ["内网验收中", "测试服全完成"]) {
+for (const status of ["内网验收中", "测试服全完成", "待上线"]) {
   const invalidUiProgress = fieldDecisions("UI进度", {
     UI需求: "需要UI",
     UI进度: "制作/拆分中"

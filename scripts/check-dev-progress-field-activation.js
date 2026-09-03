@@ -41,7 +41,11 @@ assert.deepStrictEqual(missingFieldNames("新功能", "规划中", ""), ["需求
 assert.deepStrictEqual(missingFieldNames("新功能", "实现中", ""), ["群聊", "需求名称"]);
 assert.deepStrictEqual(missingFieldNames("新功能", "实现中", "需求群"), ["需求名称"]);
 assert.deepStrictEqual(missingFieldNames("新功能", "内网验收中", ""), ["需求名称"]);
-assert.deepStrictEqual(missingFieldNames("新功能", "测试阻塞", ""), []);
+assert.deepStrictEqual(missingFieldNames("新功能", "测试阻塞", ""), ["需求名称"]);
+assert.deepStrictEqual(missingFieldNames("新功能", "待上线", ""), ["需求名称"]);
+assert.deepStrictEqual(missingFieldNames("新功能", "已更新但未验收", ""), ["需求名称"]);
+assert.deepStrictEqual(missingFieldNames("新功能", "已拒绝", ""), []);
+assert.deepStrictEqual(missingFieldNames("新功能", "暂停中", ""), []);
 assert.deepStrictEqual(missingFieldNames("任务拆分", "实现中", ""), []);
 
 assert.deepStrictEqual(missingFieldNames("配置", "实现中", ""), ["需求名称"]);

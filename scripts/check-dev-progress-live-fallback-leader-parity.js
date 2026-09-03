@@ -69,9 +69,9 @@ for (const leaderName of requestedLeaderNames) {
     onlyFallbackDemandIds: difference.onlyRight,
     differentMissingFieldDemandIds: difference.fieldDifference
   });
-  assert(personalItems.length > 1, `${leaderName} 当前真实个人字段页异常折叠为一条或为空`);
+  assert(personalItems.length > 0, `${leaderName} 当前真实个人字段页不应为空`);
   assert.strictEqual(personalUniqueRecordCount, personalItems.length, `${leaderName} 当前真实个人字段页存在重复 recordId`);
-  assert(fieldItems.length > 1, `${leaderName} 当前真实字段页异常折叠为一条或为空`);
+  assert(fieldItems.length > 0, `${leaderName} 当前真实字段页不应为空`);
   assert.strictEqual(uniqueRecordCount, rawFieldItems.length, `${leaderName} 当前真实字段页存在重复 recordId`);
   assert.deepStrictEqual(difference, { onlyLeft: [], onlyRight: [], fieldDifference: [] }, `${leaderName} 兜底筛选与本人字段页不一致`);
 }

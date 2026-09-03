@@ -572,6 +572,7 @@ function normalizeFieldMonitorRules(value) {
         field: String(input.field || "").trim(),
         startStatus: String(input.startStatus || "").trim(),
         endStatus: String(input.endStatus || "").trim(),
+        monitorGroups: normalizeRequiredFieldNames(input.monitorGroups),
         required: Boolean(input.required),
         excludedDemandTypes: normalizeRequiredFieldNames(input.excludedDemandTypes),
         when: normalizeRuleCondition(input.when),
@@ -583,6 +584,16 @@ function normalizeFieldMonitorRules(value) {
       };
     })
     .filter((item) => item.field && item.startStatus);
+}
+
+function normalizeRequiredFieldStatusGroups(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(Object.entries(input)
+    .map(([groupName, statuses]) => [
+      String(groupName || "").trim(),
+      normalizeRequiredFieldNames(statuses)
+    ])
+    .filter(([groupName, statuses]) => groupName && statuses.length > 0));
 }
 
 function normalizeRuleLeaders(value) {
@@ -613,6 +624,7 @@ function defaultRequiredFieldsRules() {
     sourceVersion: "",
     stageInclusive: true,
     statusSequence: [],
+    statusGroups: {},
     excludedDemandTypes: [],
     calendar: {
       sheetName: "工作日",
@@ -673,6 +685,7 @@ function normalizeRequiredFieldsRules(input, baseRule = defaultRequiredFieldsRul
     sourceVersion: String(current.sourceVersion || "").trim(),
     stageInclusive: current.stageInclusive !== false,
     statusSequence: normalizeRequiredFieldNames(current.statusSequence),
+    statusGroups: normalizeRequiredFieldStatusGroups(current.statusGroups),
     excludedDemandTypes: normalizeRequiredFieldNames(current.excludedDemandTypes),
     calendar: {
       sheetName: String(calendar.sheetName || "工作日").trim(),

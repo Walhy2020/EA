@@ -68,11 +68,12 @@ const leaderSupplementTitle = document.getElementById("leaderSupplementTitle");
 const leaderSupplementFields = document.getElementById("leaderSupplementFields");
 const DEFAULT_PROJECT_NAME = "恶魔高校";
 const FALLBACK_VIEWER_NAMES = new Set(["王谦", "李晶晶"]);
-const H5_PAGE_VERSION = "0.2.8";
+const H5_PAGE_VERSION = "0.3.0";
 const ENTRY_CONTEXT = window.EADemandEntryContext || {};
 const FALLBACK_LEADER_FILTER_API = window.EADemandFallbackLeaderFilter || null;
 const DEMAND_LOCATOR_NAVIGATION = window.EADemandLocatorNavigation || null;
 const DEMAND_TASK_TIME_SORT = window.EADemandTaskTimeSort || null;
+const TASK_ID_COPY_API = window.EADemandTaskIdCopy || null;
 const entryStatus = document.getElementById("entryStatus");
 const sessionUserName = document.getElementById("sessionUserName");
 const logoutButton = document.getElementById("logoutButton");
@@ -525,6 +526,49 @@ async function copyText(text) {
   }
   clipboardFallback(value);
   return true;
+}
+
+function makeTaskCardInteractive(card) {
+  card.setAttribute("role", "button");
+  card.tabIndex = 0;
+  card.addEventListener("keydown", (event) => {
+    if (event.target !== card || (event.key !== "Enter" && event.key !== " ")) {
+      return;
+    }
+    event.preventDefault();
+    card.click();
+  });
+}
+
+function appendTaskIdCopyButton(card, item) {
+  const taskId = TASK_ID_COPY_API ? TASK_ID_COPY_API.taskIdForItem(item) : "";
+  if (!taskId) {
+    return;
+  }
+  const button = document.createElement("button");
+  button.className = "task-id-copy-button";
+  button.type = "button";
+  button.title = "复制任务ID";
+  button.setAttribute("aria-label", `复制任务ID ${taskId}`);
+  const icon = document.createElement("span");
+  icon.className = "task-id-copy-icon";
+  icon.setAttribute("aria-hidden", "true");
+  button.appendChild(icon);
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const result = await TASK_ID_COPY_API.copyTaskId(taskId, copyText);
+    console.info("Demand H5 task ID copy finished", {
+      userName: currentUserName(),
+      panel: activePanelName(),
+      taskIdLength: taskId.length,
+      ok: result.ok,
+      reason: result.reason
+    });
+    showToast(result.ok ? `已复制任务ID：${taskId}` : "任务ID复制失败");
+  });
+  card.classList.add("has-task-id-copy");
+  card.appendChild(button);
 }
 
 function locatorLog(item, result) {
@@ -1096,9 +1140,9 @@ function renderRequiredItemList(listNode, items, datasetName) {
   listNode.innerHTML = "";
 
   for (const requiredItem of items) {
-    const item = document.createElement("button");
+    const item = document.createElement("div");
     item.className = "draft-list-item required-field-item";
-    item.type = "button";
+    makeTaskCardInteractive(item);
     item.dataset[datasetName] = requiredItem.id;
 
     const text = document.createElement("span");
@@ -1121,6 +1165,7 @@ function renderRequiredItemList(listNode, items, datasetName) {
 
     text.append(title, meta, missing);
     item.append(text);
+    appendTaskIdCopyButton(item, requiredItem);
     listNode.appendChild(item);
   }
 }
@@ -1158,9 +1203,9 @@ function renderTodoList() {
   todoList.innerHTML = "";
 
   for (const todo of todos) {
-    const item = document.createElement("button");
+    const item = document.createElement("div");
     item.className = "draft-list-item";
-    item.type = "button";
+    makeTaskCardInteractive(item);
     item.dataset.todoId = todo.id;
 
     const text = document.createElement("span");
@@ -1182,6 +1227,7 @@ function renderTodoList() {
       action.textContent = "处理";
       item.append(action);
     }
+    appendTaskIdCopyButton(item, todo);
     todoList.appendChild(item);
   }
 }
@@ -1193,9 +1239,9 @@ function renderMemberTodoList() {
   memberTodoList.innerHTML = "";
 
   for (const todo of memberTodos) {
-    const item = document.createElement("button");
+    const item = document.createElement("div");
     item.className = "draft-list-item";
-    item.type = "button";
+    makeTaskCardInteractive(item);
     item.dataset.memberTodoId = todo.id;
 
     const text = document.createElement("span");
@@ -1212,6 +1258,7 @@ function renderMemberTodoList() {
 
     text.append(title, meta);
     item.append(text);
+    appendTaskIdCopyButton(item, todo);
     memberTodoList.appendChild(item);
   }
 }
