@@ -2776,9 +2776,28 @@ function createWatchdogModule(options = {}) {
     const cardTaskId = normalizeText(options.cardTaskId)
       || `ea_watch_control_${task.id}_${Date.now()}`;
     const remark = taskRemarkText(task);
+    const feedbackLabel = normalizeText(options.feedbackLabel);
+    const feedbackNote = normalizeText(options.feedbackNote);
+    const feedbackAt = normalizeText(options.feedbackAt);
+    const assignee = task.assigneeName || task.assigneeUserId || "未知";
+    const terminalStatus = task.status === "completed"
+      ? "已完成，盯梢已停止"
+      : task.status === "rejected"
+        ? "已拒绝，盯梢已停止"
+        : "";
     const contents = [
-      { keyname: "被盯梢人", value: task.assigneeName || task.assigneeUserId || "未知" },
+      { keyname: "被盯梢人", value: assignee },
       { keyname: isOneTimeTask(task) ? "提醒时间" : "盯梢时间", value: scheduleDisplay(task) },
+      ...(feedbackLabel ? [
+        { keyname: "最新反馈", value: `${assignee}：${feedbackLabel}` },
+        { keyname: "反馈时间", value: formatLocalMinute(feedbackAt || new Date().toISOString()) },
+        {
+          keyname: terminalStatus ? "任务状态" : "下次盯梢",
+          value: terminalStatus || (task.awaitingRescheduleFrom
+            ? "等待补充下次盯梢时间"
+            : (task.nextRunAt ? formatLocalMinute(task.nextRunAt) : "待补充"))
+        }
+      ] : []),
       watchdogTaskIdCardItem(task)
     ].filter(Boolean);
     if (feedbackUrl) {
@@ -2797,9 +2816,9 @@ function createWatchdogModule(options = {}) {
       },
       main_title: {
         title: truncate(task.content, 60),
-        desc: ""
+        desc: feedbackLabel ? `${assignee}：${feedbackLabel}` : ""
       },
-      ...(remark ? { sub_title_text: truncate(`备注：${remark}`, 160) } : {}),
+      ...((feedbackNote || remark) ? { sub_title_text: truncate(feedbackNote ? `当前情况：${feedbackNote}` : `备注：${remark}`, 160) } : {}),
       card_action: feedbackUrl
         ? { type: 1, url: feedbackUrl }
         : { type: 1, url: "https://work.weixin.qq.com" },
@@ -2963,6 +2982,20 @@ function createWatchdogModule(options = {}) {
     )) || null;
   }
 
+  function activeRequesterMirrorRecordForCard(task, assigneeCardTaskId) {
+    const cardTaskId = normalizeText(assigneeCardTaskId);
+    if (!cardTaskId) {
+      return null;
+    }
+    const records = Array.isArray(task.appPushMessages) ? task.appPushMessages : [];
+    return records.slice().reverse().find((item) => (
+      item
+      && normalizeText(item.targetRole) === "requester"
+      && normalizeText(item.linkedCardTaskId) === cardTaskId
+      && !normalizeText(item.recalledAt)
+    )) || null;
+  }
+
   function setRequesterReceiptSyncFailure(task, record, error) {
     const info = errorInfo(error, "发起人盯梢卡 New 状态同步失败");
     const failedAt = new Date().toISOString();
@@ -3115,6 +3148,189 @@ function createWatchdogModule(options = {}) {
     }
   }
 
+  function setRequesterFeedbackCardSyncFailure(task, input, error) {
+    const info = errorInfo(error, "发起人盯梢反馈卡合并失败");
+    const failedAt = new Date().toISOString();
+    const retryAt = new Date(Date.now() + config.appPush.failureBackoffMs).toISOString();
+    task.pendingRequesterFeedbackCardSync = {
+      cardTaskId: normalizeText(input.cardTaskId),
+      label: normalizeText(input.label),
+      note: normalizeText(input.note),
+      responseAt: normalizeText(input.responseAt)
+    };
+    task.requesterFeedbackCardSyncRetryAt = retryAt;
+    task.requesterFeedbackCardSyncLastError = info.message;
+    task.requesterFeedbackCardSyncLastFailedAt = failedAt;
+    task.updatedAt = failedAt;
+    save();
+    if (logger && typeof logger.warn === "function") {
+      logger.warn("Watchdog requester feedback card merge queued", {
+        taskId: task.id,
+        assigneeCardTaskId: normalizeText(input.cardTaskId),
+        label: normalizeText(input.label),
+        retryAt,
+        errcode: info.errcode,
+        errmsg: info.errmsg,
+        message: info.message
+      });
+    }
+    return { ok: false, queued: true, retryAt, error: info.message };
+  }
+
+  async function syncAppRequesterFeedbackCardState(input = {}) {
+    const cardTaskId = normalizeText(input.cardTaskId);
+    const id = normalizeText(input.taskId) || appReminderTaskIdFromCardTaskId(cardTaskId);
+    const task = id ? findTask(id) : null;
+    const label = normalizeText(input.label);
+    const note = normalizeText(input.note);
+    const responseAt = normalizeText(input.responseAt);
+    if (!task || !cardTaskId || !label || !responseAt) {
+      return { ok: false, skipped: true, reason: "task_card_or_feedback_missing" };
+    }
+    const feedbackRecorded = Array.isArray(task.responses) && task.responses.some((item) => (
+      item
+      && normalizeText(item.cardTaskId) === cardTaskId
+      && normalizeText(item.label) === label
+      && normalizeText(item.receivedAt) === responseAt
+    ));
+    if (!feedbackRecorded) {
+      return { ok: false, skipped: true, reason: "feedback_not_recorded" };
+    }
+    const record = activeRequesterMirrorRecordForCard(task, cardTaskId);
+    if (!record) {
+      return { ok: false, skipped: true, reason: "active_requester_mirror_not_found" };
+    }
+    if (normalizeText(record.feedbackSyncResponseAt) === responseAt) {
+      return { ok: true, duplicate: true, replacementMessageId: normalizeText(record.feedbackReplacementMessageId) };
+    }
+    if (!appNotifier || typeof appNotifier.recallMessage !== "function" || typeof appNotifier.send !== "function") {
+      return setRequesterFeedbackCardSyncFailure(task, input, new Error("企业微信自建应用发送器不支持撤回并补发卡片"));
+    }
+    const sentAtMs = dateValueMs(record.sentAt);
+    if (sentAtMs && Date.now() - sentAtMs > WECOM_APP_MESSAGE_RECALL_WINDOW_MS) {
+      // 企业微信超过撤回期限后不能更新原卡，改为单独反馈卡，确保发起人仍能收到结果。
+      const fallback = await sendWatchdogResultNotice(task, label, {
+        note,
+        responseAt,
+        assigneeCardTaskId: cardTaskId,
+        forceSeparate: true
+      });
+      if (!fallback || !fallback.ok) {
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("Watchdog requester feedback card merge expired and fallback notice queued", {
+            taskId: task.id,
+            assigneeCardTaskId: cardTaskId,
+            label,
+            retryAt: fallback && fallback.retryAt ? fallback.retryAt : "",
+            reason: fallback && (fallback.reason || fallback.error) ? (fallback.reason || fallback.error) : ""
+          });
+        }
+        return {
+          ok: false,
+          queued: Boolean(fallback && fallback.retryAt),
+          retryAt: fallback && fallback.retryAt ? fallback.retryAt : "",
+          reason: "requester_card_recall_expired"
+        };
+      }
+      const syncedAt = new Date().toISOString();
+      record.feedbackSyncResponseAt = responseAt;
+      record.feedbackSyncedAt = syncedAt;
+      record.feedbackSeparateNoticeMessageId = fallback.msgid || "";
+      task.pendingRequesterFeedbackCardSync = null;
+      task.requesterFeedbackCardSyncRetryAt = "";
+      task.requesterFeedbackCardSyncLastError = "";
+      task.updatedAt = syncedAt;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog requester feedback sent separately because original card recall expired", {
+          taskId: task.id,
+          assigneeCardTaskId: cardTaskId,
+          label,
+          sentAt: normalizeText(record.sentAt),
+          responseAt,
+          resultMessageIdConfigured: Boolean(fallback.msgid)
+        });
+      }
+      return {
+        ok: true,
+        fallback: true,
+        reason: "requester_card_recall_expired",
+        channel: fallback.channel || "wecom-app",
+        msgid: fallback.msgid || ""
+      };
+    }
+    try {
+      const recalled = await appNotifier.recallMessage({
+        msgid: record.msgid,
+        purpose: "watchdog_requester_feedback_card_merge"
+      });
+      if (!recalled || !recalled.ok) {
+        throw new Error((recalled && recalled.reason) || "企业微信发起人盯梢原卡撤回失败");
+      }
+      record.recalledAt = new Date().toISOString();
+      record.recallPurpose = "requester_feedback_card_merge";
+      save();
+
+      const replacementCard = appRequesterReminderCard(task, record.tipType, {
+        received: true,
+        feedbackLabel: label,
+        feedbackNote: note,
+        feedbackAt: responseAt
+      });
+      const result = await appNotifier.send({
+        targetUserId: task.requesterUserId,
+        purpose: "watchdog_requester_feedback_merged",
+        messageType: "template_card",
+        templateCard: replacementCard
+      });
+      if (!result || !result.ok || !normalizeText(result.msgid)) {
+        throw new Error((result && result.reason) || "企业微信发起人盯梢反馈合并卡补发失败或缺少消息 ID");
+      }
+      const syncedAt = new Date().toISOString();
+      record.feedbackSyncResponseAt = responseAt;
+      record.feedbackSyncedAt = syncedAt;
+      record.feedbackReplacementMessageId = result.msgid || "";
+      rememberAppPushMessage(task, {
+        msgid: result.msgid || "",
+        sentAt: syncedAt,
+        tipType: record.tipType,
+        messageType: "template_card",
+        targetRole: "requester",
+        cardTaskId: replacementCard.task_id,
+        linkedCardTaskId: cardTaskId,
+        readState: "feedback",
+        replacesMessageId: record.msgid
+      });
+      task.appRequesterLastCardTaskId = replacementCard.task_id;
+      task.appRequesterLastMessageId = result.msgid || "";
+      task.appRequesterLastSentAt = syncedAt;
+      task.appRequesterLastError = "";
+      task.pendingRequesterFeedbackCardSync = null;
+      task.requesterFeedbackCardSyncRetryAt = "";
+      task.requesterFeedbackCardSyncLastError = "";
+      if (normalizeText(task.controlCardTaskId) === normalizeText(record.cardTaskId)) {
+        task.controlCardTaskId = replacementCard.task_id;
+        task.controlCardSentAt = syncedAt;
+        task.controlCardChannel = "wecom-app";
+      }
+      task.updatedAt = syncedAt;
+      save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog requester feedback card merged", {
+          taskId: task.id,
+          assigneeCardTaskId: cardTaskId,
+          requesterCardTaskId: normalizeText(record.cardTaskId),
+          replacementCardTaskId: replacementCard.task_id,
+          label,
+          replacementMessageIdConfigured: Boolean(result.msgid)
+        });
+      }
+      return { ok: true, syncedAt, replacementMessageId: result.msgid || "" };
+    } catch (error) {
+      return setRequesterFeedbackCardSyncFailure(task, input, error);
+    }
+  }
+
   async function retryPendingRequesterReceiptSyncs(nowMs) {
     const candidates = [];
     for (const task of state.tasks) {
@@ -3139,6 +3355,31 @@ function createWatchdogModule(options = {}) {
       logger.info("Watchdog requester card New state retry processed", {
         candidateCount: candidates.length,
         attemptedCount: Math.min(candidates.length, MAX_APP_REQUESTER_RECEIPT_SYNCS_PER_TICK),
+        syncedCount
+      });
+    }
+    return syncedCount;
+  }
+
+  async function retryPendingRequesterFeedbackCardSyncs(nowMs) {
+    const candidates = state.tasks
+      .filter((task) => task && task.pendingRequesterFeedbackCardSync)
+      .filter((task) => {
+        const retryAtMs = dateValueMs(task.requesterFeedbackCardSyncRetryAt);
+        return !retryAtMs || retryAtMs <= nowMs;
+      })
+      .slice(0, MAX_APP_REQUESTER_RECEIPT_SYNCS_PER_TICK);
+    let syncedCount = 0;
+    for (const task of candidates) {
+      const result = await syncAppRequesterFeedbackCardState({
+        taskId: task.id,
+        ...(task.pendingRequesterFeedbackCardSync || {})
+      });
+      if (result.ok) syncedCount += 1;
+    }
+    if (candidates.length > 0 && logger && typeof logger.info === "function") {
+      logger.info("Watchdog requester feedback card merge retry processed", {
+        candidateCount: candidates.length,
         syncedCount
       });
     }
@@ -3575,6 +3816,20 @@ function createWatchdogModule(options = {}) {
     const note = normalizeText(options.note);
     const responseAt = options.responseAt || new Date().toISOString();
     const useTemplateCard = appPushNativeCardReady();
+    const mirror = useTemplateCard && !options.forceSeparate
+      ? activeRequesterMirrorRecordForCard(task, options.assigneeCardTaskId)
+      : null;
+    if (mirror) {
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog app result notice merged into requester card", {
+          taskId: task.id,
+          assigneeCardTaskId: normalizeText(options.assigneeCardTaskId),
+          requesterCardTaskId: normalizeText(mirror.cardTaskId),
+          label
+        });
+      }
+      return { ok: true, merged: true, channel: "wecom-app-merged" };
+    }
     try {
       const result = await appNotifier.send({
         targetUserId: requesterUserId,
@@ -3641,7 +3896,12 @@ function createWatchdogModule(options = {}) {
   async function sendWatchdogResultNotice(task, label, options = {}) {
     const responseAt = options.responseAt || new Date().toISOString();
     const note = normalizeText(options.note);
-    const appResult = await trySendWatchdogAppResultNotice(task, label, { note, responseAt });
+    const appResult = await trySendWatchdogAppResultNotice(task, label, {
+      note,
+      responseAt,
+      assigneeCardTaskId: options.assigneeCardTaskId,
+      forceSeparate: options.forceSeparate
+    });
     if (!appResult.skipped) {
       return appResult;
     }
@@ -5088,6 +5348,7 @@ function createWatchdogModule(options = {}) {
       const appPushActive = isAppPushRequested();
       await retryPendingAppResultNotices(now);
       await retryPendingRequesterReceiptSyncs(now);
+      await retryPendingRequesterFeedbackCardSyncs(now);
       if (backoffMs > 0 && !appPushActive) {
         if (logger && typeof logger.info === "function" && now - lastBackoffLogAt >= 60 * 1000) {
           lastBackoffLogAt = now;
@@ -6293,7 +6554,8 @@ function createWatchdogModule(options = {}) {
       try {
         const notice = await sendWatchdogResultNotice(task, label, {
           note: feedbackNote,
-          responseAt: now
+          responseAt: now,
+          assigneeCardTaskId: summary.taskId
         });
         if (notice.ok && logger && typeof logger.info === "function") {
           logger.info("Watchdog result notice sent", {
@@ -6338,6 +6600,15 @@ function createWatchdogModule(options = {}) {
     return {
       handled: true,
       task,
+      syncRequesterFeedbackState: appPushNativeCardReady()
+        ? {
+          taskId: task.id,
+          cardTaskId: summary.taskId,
+          label,
+          note: feedbackNote,
+          responseAt: now
+        }
+        : null,
       updateCard: cardUpdateForResponse(task, label, {
         source: sender && sender.source ? sender.source : "",
         note: feedbackNote
@@ -6895,6 +7166,7 @@ function createWatchdogModule(options = {}) {
     tick,
     handleTemplateCardEvent,
     syncAppReminderCardReadState,
+    syncAppRequesterFeedbackCardState,
     capturePendingTextMessage,
     sendAppPushTest,
     getAppFeedbackTask,

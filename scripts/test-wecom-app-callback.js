@@ -667,6 +667,130 @@ async function main() {
     assert.equal(requesterNewRecord.replacementMessageId, "linked-3");
     assert.equal(requesterReadRecord.readState, "received");
     assert.equal(requesterReadRecord.linkedCardTaskId, linkedCard.task_id);
+
+    const mergedFeedbackResult = await linkedReminderWatchdog.handleTemplateCardEvent({
+      taskId: linkedCard.task_id,
+      eventKey: "ea_watch_progress",
+      selectedItems: [{ questionKey: "ea_watch_situation", optionIds: ["waiting_integration"] }]
+    }, {
+      userId: "assignee",
+      source: "wecom-app-native"
+    });
+    assert.equal(mergedFeedbackResult.handled, true);
+    assert.equal(mergedFeedbackResult.syncRequesterFeedbackState.taskId, "wd_linked_reminder");
+    assert.equal(mergedFeedbackResult.syncRequesterFeedbackState.cardTaskId, linkedCard.task_id);
+    assert.equal(mergedFeedbackResult.syncRequesterFeedbackState.label, "正常推进");
+    assert.equal(
+      linkedMessages.filter((message) => message.purpose === "watchdog_result_notice").length,
+      0,
+      "存在可更新的发起人卡时不能另发反馈卡"
+    );
+    const requesterFeedbackSyncResult = await linkedReminderWatchdog.syncAppRequesterFeedbackCardState(
+      mergedFeedbackResult.syncRequesterFeedbackState
+    );
+    assert.equal(requesterFeedbackSyncResult.ok, true);
+    assert.deepEqual(linkedRecalledMessageIds, ["linked-2", "linked-3"]);
+    const requesterFeedbackMessage = linkedMessages[3];
+    assert.equal(requesterFeedbackMessage.targetUserId, "requester");
+    assert.equal(requesterFeedbackMessage.purpose, "watchdog_requester_feedback_merged");
+    assert.equal(requesterFeedbackMessage.templateCard.source.desc, "EA盯梢");
+    assert.equal(requesterFeedbackMessage.templateCard.source.desc.includes("NEW"), false);
+    assert.equal(requesterFeedbackMessage.templateCard.main_title.desc, "责任同事：正常推进");
+    assert.deepEqual(requesterFeedbackMessage.templateCard.button_list, [
+      { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
+    ]);
+    assert.deepEqual(
+      requesterFeedbackMessage.templateCard.horizontal_content_list.map((item) => item.keyname),
+      ["被盯梢人", "盯梢时间", "最新反馈", "反馈时间", "下次盯梢", "任务ID", "详情"]
+    );
+    assert.equal(
+      requesterFeedbackMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "最新反馈").value,
+      "责任同事：正常推进"
+    );
+    assert.equal(
+      requesterFeedbackMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情").value,
+      "查看盯梢详情"
+    );
+
+    const expiredFeedbackStoreFile = path.join(directory, "expired-requester-feedback-card-tasks.json");
+    const expiredFeedbackCardTaskId = "ea_watch_wd_linked_expired_card";
+    const expiredFeedbackAt = "2026-08-14T07:00:00.000Z";
+    fs.writeFileSync(expiredFeedbackStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_linked_expired", {
+        appPushMessages: [{
+          msgid: "expired-requester-card-message",
+          sentAt: "2020-08-14T07:00:00.000Z",
+          tipType: "recurring",
+          messageType: "template_card",
+          targetRole: "requester",
+          cardTaskId: "ea_watch_control_wd_linked_expired",
+          linkedCardTaskId: expiredFeedbackCardTaskId,
+          readState: "received"
+        }],
+        responses: [{
+          receivedAt: expiredFeedbackAt,
+          eventKey: "ea_watch_progress",
+          label: "正常推进",
+          senderUserId: "assignee",
+          cardTaskId: expiredFeedbackCardTaskId,
+          source: "wecom-app-native",
+          note: "旧卡超过撤回期限后的反馈"
+        }]
+      })],
+      drafts: []
+    }, null, 2)}\n`, "utf8");
+    const expiredFeedbackMessages = [];
+    const expiredFeedbackRecalledMessageIds = [];
+    const expiredFeedbackWatchdog = createWatchdogModule({
+      storeFile: expiredFeedbackStoreFile,
+      moduleConfig: {
+        enabled: true,
+        appPush: {
+          enabled: true,
+          corpIdEnv: "TEST_FEEDBACK_CORP_ID",
+          agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
+          secretEnv: "TEST_FEEDBACK_SECRET",
+          nativeCard: { enabled: true }
+        }
+      },
+      appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
+      appNotifier: {
+        getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
+        send: async (message) => {
+          expiredFeedbackMessages.push(message);
+          return { ok: true, msgid: `expired-feedback-${expiredFeedbackMessages.length}` };
+        },
+        recallMessage: async (message) => {
+          expiredFeedbackRecalledMessageIds.push(message.msgid);
+          return { ok: true, msgid: message.msgid };
+        }
+      },
+      logger: { info() {}, warn() {} }
+    });
+    const expiredFeedbackSync = await expiredFeedbackWatchdog.syncAppRequesterFeedbackCardState({
+      taskId: "wd_linked_expired",
+      cardTaskId: expiredFeedbackCardTaskId,
+      label: "正常推进",
+      note: "旧卡超过撤回期限后的反馈",
+      responseAt: expiredFeedbackAt
+    });
+    assert.equal(expiredFeedbackSync.ok, true);
+    assert.equal(expiredFeedbackSync.fallback, true);
+    assert.equal(expiredFeedbackSync.reason, "requester_card_recall_expired");
+    assert.deepEqual(expiredFeedbackRecalledMessageIds, []);
+    assert.equal(expiredFeedbackMessages.length, 1);
+    assert.equal(expiredFeedbackMessages[0].purpose, "watchdog_result_notice");
+    const expiredFeedbackDuplicate = await expiredFeedbackWatchdog.syncAppRequesterFeedbackCardState({
+      taskId: "wd_linked_expired",
+      cardTaskId: expiredFeedbackCardTaskId,
+      label: "正常推进",
+      note: "旧卡超过撤回期限后的反馈",
+      responseAt: expiredFeedbackAt
+    });
+    assert.equal(expiredFeedbackDuplicate.ok, true);
+    assert.equal(expiredFeedbackDuplicate.duplicate, true);
+    assert.equal(expiredFeedbackMessages.length, 1, "超过撤回期限的反馈重试不能重复推送");
+
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
     assert.match(feedbackPageScript, /window\.location\.hash/);
@@ -790,7 +914,7 @@ async function main() {
     });
     assert.equal(overlong.ok, false);
     assert.match(overlong.message, /不能超过 500 字/);
-    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").responses.length, 0);
+    assert.equal(taskById(linkedReminderStoreFile, "wd_linked_reminder").responses.length, 1);
 
     const feedback = await linkedReminderWatchdog.submitAppFeedback({
       taskId: "wd_linked_reminder",
@@ -800,8 +924,9 @@ async function main() {
     });
     assert.equal(feedback.ok, true);
     const linkedTask = taskById(linkedReminderStoreFile, "wd_linked_reminder");
-    assert.equal(linkedTask.responses.length, 1);
-    assert.equal(linkedTask.responses[0].note, "联调完成，正在观察运行情况");
+    assert.equal(linkedTask.responses.length, 2);
+    assert.equal(linkedTask.responses[0].label, "正常推进");
+    assert.equal(linkedTask.responses[1].note, "联调完成，正在观察运行情况");
     assert.equal(linkedTask.lastFeedbackNote, "联调完成，正在观察运行情况");
     assert.equal(feedback.task.feedbackHistory[0].label, "正常推进");
     assert.equal(feedback.task.feedbackHistory[0].note, "联调完成，正在观察运行情况");

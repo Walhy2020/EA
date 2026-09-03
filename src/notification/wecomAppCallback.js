@@ -203,6 +203,7 @@ function createWecomAppCallback(options = {}) {
     });
     let cardUpdated = false;
     let requesterNewStateSynced = false;
+    let requesterFeedbackCardSynced = false;
     if (
       result && result.handled && result.updateCard && responseCode
       && appNotifier && typeof appNotifier.updateTemplateCard === "function"
@@ -243,6 +244,23 @@ function createWecomAppCallback(options = {}) {
         }
       }
     }
+    if (
+      result && result.syncRequesterFeedbackState
+      && watchdog && typeof watchdog.syncAppRequesterFeedbackCardState === "function"
+    ) {
+      try {
+        const syncResult = await watchdog.syncAppRequesterFeedbackCardState(result.syncRequesterFeedbackState);
+        requesterFeedbackCardSynced = Boolean(syncResult && syncResult.ok);
+      } catch (error) {
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("WeCom watchdog requester feedback card merge failed after feedback persisted", {
+            taskId,
+            eventKey,
+            message: error && error.message ? error.message : String(error || "")
+          });
+        }
+      }
+    }
     if (logger && typeof logger.info === "function") {
       logger.info("WeCom watchdog app card event processed", {
         taskId,
@@ -251,6 +269,7 @@ function createWecomAppCallback(options = {}) {
         handled: Boolean(result && result.handled),
         cardUpdated,
         requesterNewStateSynced,
+        requesterFeedbackCardSynced,
         responseCodeConfigured: Boolean(responseCode),
         selectedItemCount: selectedItems.length,
         selectedQuestionKeys: selectedItems.map((item) => item.questionKey)
