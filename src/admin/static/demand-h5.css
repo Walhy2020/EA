@@ -170,10 +170,17 @@ button {
 
 .context-bar {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+}
+
+.project-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .context-status {
@@ -247,6 +254,7 @@ h3 {
 }
 
 .project-switcher {
+  min-width: 0;
   margin-bottom: 0;
 }
 
@@ -254,9 +262,59 @@ h3 {
   display: block;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 6px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.project-select-wrap select {
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+}
+
+.context-icon-button,
+.dialog-close-button,
+.project-order-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.context-icon-button {
+  width: 40px;
+  min-height: 40px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 21px;
+}
+
+.context-icon-button:hover,
+.context-icon-button:focus-visible,
+.dialog-close-button:hover,
+.dialog-close-button:focus-visible,
+.project-order-button:hover,
+.project-order-button:focus-visible {
+  border-color: var(--brand);
+  outline: 2px solid var(--focus-ring);
+  color: var(--brand-dark);
+}
+
+.context-icon-button:disabled,
+.project-order-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.context-icon-button.is-refreshing span {
+  animation: demand-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes demand-refresh-spin {
+  to { transform: rotate(360deg); }
 }
 
 .data-status {
@@ -1096,6 +1154,128 @@ textarea:focus {
   flex: 1;
 }
 
+.project-settings-dialog {
+  width: min(460px, calc(100vw - 28px));
+  max-height: min(680px, calc(100vh - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(23, 32, 51, 0.22);
+}
+
+.project-settings-dialog::backdrop {
+  background: rgba(23, 32, 51, 0.44);
+}
+
+.project-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.project-settings-head h2 {
+  margin: 0;
+}
+
+.dialog-close-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  font-size: 22px;
+}
+
+.settings-toggle-row,
+.all-project-option,
+.project-order-row {
+  display: flex;
+  align-items: center;
+}
+
+.settings-toggle-row {
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 0;
+  font-weight: 700;
+}
+
+.settings-toggle-row input,
+.all-project-option input {
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+.project-settings-fieldset {
+  margin: 10px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+}
+
+.project-settings-fieldset legend,
+.project-order-section h3 {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.all-project-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.all-project-option {
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-settings-fieldset:disabled {
+  opacity: 0.5;
+}
+
+.project-order-section h3 {
+  margin: 0 0 8px;
+}
+
+.project-order-list {
+  display: grid;
+  gap: 6px;
+}
+
+.project-order-row {
+  min-height: 42px;
+  border-bottom: 1px solid #edf0f5;
+  gap: 6px;
+}
+
+.project-order-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-order-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  font-size: 17px;
+}
+
+.project-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 .build-version {
   margin-top: 12px;
   color: var(--muted);
@@ -1169,6 +1349,14 @@ textarea:focus {
   .context-bar {
     grid-template-columns: 1fr;
     gap: 7px;
+  }
+
+  .project-settings-dialog {
+    padding: 14px;
+  }
+
+  .all-project-options {
+    grid-template-columns: 1fr;
   }
 
   .leader-grid {

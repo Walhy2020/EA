@@ -161,6 +161,8 @@ function h5EntryRequestMeta(req, url, result) {
     entrySource: String(req.headers["x-ea-demand-entry-source"] || "").slice(0, 80),
     pageVersion: String(req.headers["x-ea-demand-page-version"] || "").slice(0, 32),
     project: String(url.searchParams.get("project") || "").slice(0, 80),
+    forceRefresh: url.searchParams.get("forceRefresh") === "1",
+    waitForRefresh: url.searchParams.get("waitForRefresh") === "1",
     ignoredUserNameParameter: Boolean(url.searchParams.get("userName")),
     itemCount: Array.isArray(result && result.items) ? result.items.length : 0,
     ok: Boolean(result && result.ok)

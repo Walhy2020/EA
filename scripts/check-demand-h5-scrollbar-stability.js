@@ -21,7 +21,7 @@ function layoutSnapshot({ viewportWidth, scrollbarVisible, supportsScrollbarGutt
 assert.match(css, /html\s*\{[\s\S]*?scrollbar-gutter:\s*stable;/, 'html must reserve a stable document scrollbar gutter');
 assert.match(css, /@supports not \(scrollbar-gutter: stable\)[\s\S]*?@media \(min-width: 700px\)[\s\S]*?overflow-y:\s*scroll;/, 'legacy desktop fallback must reserve a scrollbar slot');
 assert.doesNotMatch(css, /scrollbar-gutter:\s*stable both-edges/, 'do not reserve an unnecessary second gutter');
-assert.match(html, /demand-h5\.css\?v=0\.3\.0/, 'CSS cache version must match this release');
+assert.match(html, /demand-h5\.css\?v=0\.3\.1/, 'CSS cache version must match this release');
 
 for (const viewportWidth of [390, 1280]) {
   const mobile = viewportWidth < 700;

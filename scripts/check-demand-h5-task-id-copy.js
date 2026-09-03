@@ -16,8 +16,8 @@ assert.strictEqual(copyApi.taskIdForItem({ recordId: " record-3 " }), "record-3"
 assert.strictEqual(copyApi.taskIdForItem({ id: " fallback-id " }), "fallback-id");
 assert.strictEqual(copyApi.taskIdForItem({}), "");
 
-assert.match(html, /demand-task-id-copy\.js\?v=0\.3\.0[\s\S]*demand-h5\.js\?v=0\.3\.0/);
-assert.match(html, /class="build-version">v0\.3\.0</);
+assert.match(html, /demand-task-id-copy\.js\?v=0\.3\.0[\s\S]*demand-h5\.js\?v=0\.3\.1/);
+assert.match(html, /class="build-version">v0\.3\.1</);
 assert.match(css, /\.task-id-copy-button\s*\{[\s\S]*position:\s*absolute;[\s\S]*top:\s*8px;[\s\S]*right:\s*8px;/);
 assert.match(css, /\.task-id-copy-icon::before,[\s\S]*\.task-id-copy-icon::after/);
 assert.match(js, /event\.stopPropagation\(\)/);

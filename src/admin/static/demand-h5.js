@@ -19,6 +19,16 @@ const panels = {
 const tabButtons = [...document.querySelectorAll(".tab-button")];
 const tabs = document.querySelector(".tabs");
 const projectSelect = document.getElementById("projectSelect");
+const monitorRefreshButton = document.getElementById("monitorRefreshButton");
+const projectSettingsButton = document.getElementById("projectSettingsButton");
+const projectSettingsDialog = document.getElementById("projectSettingsDialog");
+const projectSettingsCloseButton = document.getElementById("projectSettingsCloseButton");
+const projectSettingsCancelButton = document.getElementById("projectSettingsCancelButton");
+const projectSettingsSaveButton = document.getElementById("projectSettingsSaveButton");
+const showAllProjectsInput = document.getElementById("showAllProjectsInput");
+const allProjectsFieldset = document.getElementById("allProjectsFieldset");
+const allProjectsOptions = document.getElementById("allProjectsOptions");
+const projectOrderList = document.getElementById("projectOrderList");
 const dataStatus = document.getElementById("dataStatus");
 const toast = document.getElementById("toast");
 const demandForm = document.getElementById("demandForm");
@@ -68,12 +78,20 @@ const leaderSupplementTitle = document.getElementById("leaderSupplementTitle");
 const leaderSupplementFields = document.getElementById("leaderSupplementFields");
 const DEFAULT_PROJECT_NAME = "恶魔高校";
 const FALLBACK_VIEWER_NAMES = new Set(["王谦", "李晶晶"]);
-const H5_PAGE_VERSION = "0.3.0";
+const H5_PAGE_VERSION = "0.3.1";
 const ENTRY_CONTEXT = window.EADemandEntryContext || {};
 const FALLBACK_LEADER_FILTER_API = window.EADemandFallbackLeaderFilter || null;
 const DEMAND_LOCATOR_NAVIGATION = window.EADemandLocatorNavigation || null;
 const DEMAND_TASK_TIME_SORT = window.EADemandTaskTimeSort || null;
 const TASK_ID_COPY_API = window.EADemandTaskIdCopy || null;
+const PROJECT_SETTINGS_API = window.EADemandProjectSettings || null;
+const PROJECT_CATALOG = [
+  { value: "恶魔高校", label: "恶魔高校", aliases: ["高校"] },
+  { value: "一骑当千", label: "一骑当千", aliases: ["一骑", "掌上谈兵", "STB"] },
+  { value: "女王之刃", label: "女王之刃", aliases: ["女王"] },
+  { value: "嗜血", label: "噬血狂袭", aliases: ["噬血狂袭"] },
+  { value: "魔王", label: "魔王", aliases: [] }
+];
 const entryStatus = document.getElementById("entryStatus");
 const sessionUserName = document.getElementById("sessionUserName");
 const logoutButton = document.getElementById("logoutButton");
@@ -120,6 +138,9 @@ let latestCacheRefreshedAt = "";
 let collaborationLoadPromise = null;
 let lastForegroundRefreshAt = 0;
 let scrollPositionSaveTimer = 0;
+let manualRefreshInProgress = false;
+let projectSettings = null;
+let projectSettingsDraft = null;
 const panelScrollPositions = {};
 const DISABLED_PANEL_NAMES = new Set(["create"]);
 
@@ -158,6 +179,152 @@ function normalizePanelName(name) {
 
 function canShowFallbackPanel() {
   return FALLBACK_VIEWER_NAMES.has(currentUserName());
+}
+
+function defaultProjectSettings() {
+  return PROJECT_SETTINGS_API
+    ? PROJECT_SETTINGS_API.normalizeSettings({}, PROJECT_CATALOG)
+    : { showAll: false, allProjects: PROJECT_CATALOG.map((item) => item.value), order: PROJECT_CATALOG.map((item) => item.value) };
+}
+
+function loadProjectSettings() {
+  if (!PROJECT_SETTINGS_API) return defaultProjectSettings();
+  try {
+    const stored = window.localStorage.getItem(PROJECT_SETTINGS_API.STORAGE_KEY);
+    return PROJECT_SETTINGS_API.normalizeSettings(stored ? JSON.parse(stored) : {}, PROJECT_CATALOG);
+  } catch (error) {
+    console.warn("Demand H5 project settings load failed", {
+      message: error && error.message ? error.message : String(error || "")
+    });
+    return defaultProjectSettings();
+  }
+}
+
+function persistProjectSettings(settings) {
+  if (!PROJECT_SETTINGS_API) return;
+  window.localStorage.setItem(PROJECT_SETTINGS_API.STORAGE_KEY, JSON.stringify(settings));
+}
+
+function projectSelectionOptions(settings = projectSettings) {
+  return PROJECT_SETTINGS_API
+    ? PROJECT_SETTINGS_API.selectableProjects(settings, PROJECT_CATALOG)
+    : PROJECT_CATALOG;
+}
+
+function renderProjectSelect(preferredValue = "") {
+  if (!projectSelect) return "";
+  const options = projectSelectionOptions();
+  projectSelect.innerHTML = "";
+  for (const item of options) {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    projectSelect.appendChild(option);
+  }
+  const availableValues = options.map((item) => item.value);
+  const nextValue = availableValues.includes(preferredValue)
+    ? preferredValue
+    : (availableValues.includes(DEFAULT_PROJECT_NAME) ? DEFAULT_PROJECT_NAME : availableValues[0] || "");
+  projectSelect.value = nextValue;
+  return nextValue;
+}
+
+function selectedProjectValue() {
+  return projectSelect ? String(projectSelect.value || "").trim() : String(projectInput.value || "").trim();
+}
+
+function selectedProjectQueryValue() {
+  const value = selectedProjectValue();
+  return PROJECT_SETTINGS_API && value === PROJECT_SETTINGS_API.ALL_PROJECT_VALUE ? "" : value;
+}
+
+function appendSelectedProject(params) {
+  const project = selectedProjectQueryValue();
+  if (project) params.set("project", project);
+}
+
+function filterItemsForSelectedProject(items) {
+  if (!PROJECT_SETTINGS_API) return [...(items || [])];
+  return PROJECT_SETTINGS_API.filterItems(items, selectedProjectValue(), projectSettings, PROJECT_CATALOG);
+}
+
+function projectLabel(value) {
+  if (PROJECT_SETTINGS_API && value === PROJECT_SETTINGS_API.ALL_PROJECT_VALUE) return "全部项目";
+  const item = PROJECT_CATALOG.find((project) => project.value === value);
+  return item ? item.label : value;
+}
+
+function renderAllProjectOptions() {
+  if (!allProjectsOptions || !projectSettingsDraft) return;
+  allProjectsOptions.innerHTML = "";
+  const included = new Set(projectSettingsDraft.allProjects || []);
+  for (const project of PROJECT_CATALOG) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    const text = document.createElement("span");
+    label.className = "all-project-option";
+    checkbox.type = "checkbox";
+    checkbox.value = project.value;
+    checkbox.checked = included.has(project.value);
+    text.textContent = project.label;
+    label.append(checkbox, text);
+    allProjectsOptions.appendChild(label);
+  }
+}
+
+function renderProjectOrderList() {
+  if (!projectOrderList || !projectSettingsDraft || !PROJECT_SETTINGS_API) return;
+  projectOrderList.innerHTML = "";
+  const order = PROJECT_SETTINGS_API.visibleOrder(projectSettingsDraft, PROJECT_CATALOG);
+  order.forEach((value, index) => {
+    const row = document.createElement("div");
+    const label = document.createElement("span");
+    const moveUp = document.createElement("button");
+    const moveDown = document.createElement("button");
+    row.className = "project-order-row";
+    label.className = "project-order-label";
+    label.textContent = projectLabel(value);
+    moveUp.className = "project-order-button";
+    moveUp.type = "button";
+    moveUp.dataset.projectOrderValue = value;
+    moveUp.dataset.projectOrderDirection = "up";
+    moveUp.textContent = "↑";
+    moveUp.title = `上移${label.textContent}`;
+    moveUp.setAttribute("aria-label", moveUp.title);
+    moveUp.disabled = index === 0;
+    moveDown.className = "project-order-button";
+    moveDown.type = "button";
+    moveDown.dataset.projectOrderValue = value;
+    moveDown.dataset.projectOrderDirection = "down";
+    moveDown.textContent = "↓";
+    moveDown.title = `下移${label.textContent}`;
+    moveDown.setAttribute("aria-label", moveDown.title);
+    moveDown.disabled = index === order.length - 1;
+    row.append(label, moveUp, moveDown);
+    projectOrderList.appendChild(row);
+  });
+}
+
+function renderProjectSettingsDialog() {
+  if (!projectSettingsDraft) return;
+  if (showAllProjectsInput) showAllProjectsInput.checked = projectSettingsDraft.showAll;
+  if (allProjectsFieldset) allProjectsFieldset.disabled = !projectSettingsDraft.showAll;
+  renderAllProjectOptions();
+  renderProjectOrderList();
+}
+
+function openProjectSettings() {
+  if (!projectSettingsDialog || !PROJECT_SETTINGS_API) return;
+  projectSettingsDraft = PROJECT_SETTINGS_API.normalizeSettings(projectSettings, PROJECT_CATALOG);
+  renderProjectSettingsDialog();
+  if (typeof projectSettingsDialog.showModal === "function") projectSettingsDialog.showModal();
+  else projectSettingsDialog.setAttribute("open", "");
+}
+
+function closeProjectSettings() {
+  if (!projectSettingsDialog) return;
+  if (typeof projectSettingsDialog.close === "function") projectSettingsDialog.close();
+  else projectSettingsDialog.removeAttribute("open");
 }
 
 async function requestJson(url, options = {}) {
@@ -238,6 +405,9 @@ function activePanelName() {
 
 function setListLoading(isLoading) {
   listLoading = Boolean(isLoading);
+  if (monitorRefreshButton) {
+    monitorRefreshButton.disabled = listLoading || manualRefreshInProgress;
+  }
   if (listLoading) {
     updateDataStatus();
   }
@@ -935,97 +1105,108 @@ function updateLeaderNavigation() {
   }
 }
 
-async function loadDraftsFromServer() {
+async function loadDraftsFromServer(options = {}) {
   try {
     const params = new URLSearchParams();
     params.set("limit", "4000");
-    if (projectInput.value.trim()) {
-      params.set("project", projectInput.value.trim());
-    }
+    appendSelectedProject(params);
+    if (options.forceRefresh) params.set("forceRefresh", "1");
+    if (options.waitForRefresh) params.set("waitForRefresh", "1");
     const result = await requestJson(`/api/dev-progress/required-field-items?${params.toString()}`);
     const devProgress = result.devProgress || {};
     updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
-    replaceRequiredFieldItems(Array.isArray(devProgress.items) ? devProgress.items : []);
+    replaceRequiredFieldItems(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []));
+    return devProgress.cache || null;
   } catch (error) {
+    if (options.throwOnError) throw error;
     showToast(`读取待补充需求失败：${error.message}`);
+    return null;
   }
 }
 
-async function loadFallbackItemsFromServer() {
+async function loadFallbackItemsFromServer(options = {}) {
   if (!canShowFallbackPanel()) {
     replaceFallbackRequiredFieldItems([]);
-    return;
+    return null;
   }
   try {
     const params = new URLSearchParams();
     params.set("limit", "4000");
     params.set("scope", "fallback");
-    if (projectInput.value.trim()) {
-      params.set("project", projectInput.value.trim());
-    }
+    appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/required-field-items?${params.toString()}`);
     const devProgress = result.devProgress || {};
     updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
     replaceFallbackLeaderFilters(devProgress.leaderFilters);
-    replaceFallbackRequiredFieldItems(Array.isArray(devProgress.items) ? devProgress.items : []);
+    replaceFallbackRequiredFieldItems(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []));
+    return devProgress.cache || null;
   } catch (error) {
+    if (options.throwOnError) throw error;
     showToast(`读取兜底需求失败：${error.message}`);
+    return null;
   }
 }
 
-async function loadTodosFromServer() {
+async function loadTodosFromServer(options = {}) {
   try {
     const params = new URLSearchParams();
     params.set("limit", "4000");
-    if (projectInput.value.trim()) {
-      params.set("project", projectInput.value.trim());
-    }
+    appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/person-tasks?${params.toString()}`);
     const devProgress = result.devProgress || {};
     updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
-    replaceTodos(Array.isArray(devProgress.items) ? devProgress.items.map((item) => ({
+    replaceTodos(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []).map((item) => ({
       ...item,
       source: "dev_progress"
-    })) : []);
+    })));
+    return devProgress.cache || null;
   } catch (error) {
+    if (options.throwOnError) throw error;
     showToast(`读取待办失败：${error.message}`);
+    return null;
   }
 }
 
-async function loadMemberTodosFromServer() {
+async function loadMemberTodosFromServer(options = {}) {
   try {
     const params = new URLSearchParams();
     params.set("limit", "4000");
-    if (projectInput.value.trim()) {
-      params.set("project", projectInput.value.trim());
-    }
+    appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/member-tasks?${params.toString()}`);
     const devProgress = result.devProgress || {};
     updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
     currentUserLeaderRoles = Array.isArray(devProgress.leaderRoles) ? devProgress.leaderRoles : [];
     memberTodoMessage = devProgress.message || "";
-    replaceMemberTodos(Array.isArray(devProgress.items) ? devProgress.items.map((item) => ({
+    replaceMemberTodos(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []).map((item) => ({
       ...item,
       source: "dev_progress"
-    })) : []);
+    })));
+    return devProgress.cache || null;
   } catch (error) {
     currentUserLeaderRoles = [];
     memberTodoMessage = "";
     replaceMemberTodos([]);
+    if (options.throwOnError) throw error;
     showToast(`读取组员待办失败：${error.message}`);
+    return null;
   }
 }
 
-async function loadTodoDataFromServer() {
-  await loadTodosFromServer();
-  await loadMemberTodosFromServer();
+async function loadTodoDataFromServer(options = {}) {
+  await loadTodosFromServer(options);
+  await loadMemberTodosFromServer(options);
   renderTodoPanel();
 }
 
-async function loadCollaborationData() {
-  await loadDraftsFromServer();
-  await loadFallbackItemsFromServer();
-  await loadTodoDataFromServer();
+async function loadCollaborationData(options = {}) {
+  const cache = await loadDraftsFromServer({
+    forceRefresh: Boolean(options.forceRefresh),
+    waitForRefresh: Boolean(options.forceRefresh || options.waitForRefresh),
+    throwOnError: Boolean(options.throwOnError)
+  });
+  await loadFallbackItemsFromServer(options);
+  await loadTodoDataFromServer(options);
+  return { cache };
 }
 
 async function refreshCollaborationData(options = {}) {
@@ -1035,9 +1216,11 @@ async function refreshCollaborationData(options = {}) {
 
   const panelName = options.panelName || activePanelName();
   setListLoading(true);
-  collaborationLoadPromise = loadCollaborationData()
+  collaborationLoadPromise = loadCollaborationData(options)
     .catch((error) => {
-      showToast(`读取协作数据失败：${error.message}`);
+      if (!options.manual) showToast(`读取协作数据失败：${error.message}`);
+      if (options.throwOnError) throw error;
+      return null;
     })
     .finally(() => {
       setListLoading(false);
@@ -1057,6 +1240,51 @@ function refreshAfterPageResume() {
   }
   lastForegroundRefreshAt = now;
   refreshCollaborationData({ panelName: activePanelName() });
+}
+
+async function performManualRefresh() {
+  if (manualRefreshInProgress || collaborationLoadPromise) return;
+  const previousRefreshedAt = latestCacheRefreshedAt;
+  manualRefreshInProgress = true;
+  if (monitorRefreshButton) {
+    monitorRefreshButton.disabled = true;
+    monitorRefreshButton.classList.add("is-refreshing");
+  }
+  if (dataStatus) dataStatus.textContent = "数据更新时间：正在读取最新需求总表...";
+  const startedAt = Date.now();
+  try {
+    const result = await refreshCollaborationData({
+      panelName: activePanelName(),
+      forceRefresh: true,
+      waitForRefresh: true,
+      manual: true,
+      throwOnError: true
+    });
+    const refreshedAt = result && result.cache ? String(result.cache.refreshedAt || "") : "";
+    if (!refreshedAt || refreshedAt === previousRefreshedAt) {
+      throw new Error("未能读取最新需求总表，当前仍显示上一次成功数据");
+    }
+    console.info("Demand H5 manual refresh completed", {
+      project: selectedProjectValue(),
+      durationMs: Date.now() - startedAt,
+      refreshedAt
+    });
+    showToast("已读取最新需求总表");
+  } catch (error) {
+    updateDataStatus(previousRefreshedAt);
+    console.warn("Demand H5 manual refresh failed", {
+      project: selectedProjectValue(),
+      durationMs: Date.now() - startedAt,
+      message: error && error.message ? error.message : String(error || "")
+    });
+    showToast(`刷新失败：${error.message}`);
+  } finally {
+    manualRefreshInProgress = false;
+    if (monitorRefreshButton) {
+      monitorRefreshButton.disabled = Boolean(collaborationLoadPromise);
+      monitorRefreshButton.classList.remove("is-refreshing");
+    }
+  }
 }
 
 function resetPageScroll() {
@@ -1700,6 +1928,80 @@ for (const button of tabButtons) {
   });
 }
 
+if (monitorRefreshButton) {
+  monitorRefreshButton.addEventListener("click", performManualRefresh);
+}
+
+if (projectSettingsButton) {
+  projectSettingsButton.addEventListener("click", openProjectSettings);
+}
+
+for (const button of [projectSettingsCloseButton, projectSettingsCancelButton]) {
+  if (button) button.addEventListener("click", closeProjectSettings);
+}
+
+if (showAllProjectsInput) {
+  showAllProjectsInput.addEventListener("change", () => {
+    if (!projectSettingsDraft || !PROJECT_SETTINGS_API) return;
+    projectSettingsDraft.showAll = showAllProjectsInput.checked;
+    projectSettingsDraft = PROJECT_SETTINGS_API.normalizeSettings(projectSettingsDraft, PROJECT_CATALOG);
+    renderProjectSettingsDialog();
+  });
+}
+
+if (allProjectsOptions) {
+  allProjectsOptions.addEventListener("change", (event) => {
+    const checkbox = event.target.closest('input[type="checkbox"]');
+    if (!checkbox || !projectSettingsDraft) return;
+    const selected = new Set(projectSettingsDraft.allProjects || []);
+    if (checkbox.checked) selected.add(checkbox.value);
+    else selected.delete(checkbox.value);
+    projectSettingsDraft.allProjects = [...selected];
+  });
+}
+
+if (projectOrderList) {
+  projectOrderList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-project-order-value]");
+    if (!button || !projectSettingsDraft || !PROJECT_SETTINGS_API) return;
+    projectSettingsDraft = PROJECT_SETTINGS_API.moveProject(
+      projectSettingsDraft,
+      PROJECT_CATALOG,
+      button.dataset.projectOrderValue,
+      button.dataset.projectOrderDirection
+    );
+    renderProjectOrderList();
+  });
+}
+
+if (projectSettingsSaveButton) {
+  projectSettingsSaveButton.addEventListener("click", () => {
+    if (!projectSettingsDraft || !PROJECT_SETTINGS_API) return;
+    if (projectSettingsDraft.showAll && (projectSettingsDraft.allProjects || []).length === 0) {
+      showToast("“全部项目”至少需要包含一个项目");
+      return;
+    }
+    const previousProject = selectedProjectValue();
+    projectSettings = PROJECT_SETTINGS_API.normalizeSettings(projectSettingsDraft, PROJECT_CATALOG);
+    try {
+      persistProjectSettings(projectSettings);
+    } catch (error) {
+      showToast(`项目设置保存失败：${error.message}`);
+      return;
+    }
+    const nextProject = renderProjectSelect(previousProject);
+    switchProject(nextProject);
+    closeProjectSettings();
+    console.info("Demand H5 project settings saved", {
+      showAll: projectSettings.showAll,
+      allProjectCount: projectSettings.allProjects.length,
+      projectOrder: projectSettings.order
+    });
+    showToast("项目设置已保存");
+    refreshCollaborationData({ panelName: activePanelName() });
+  });
+}
+
 if (projectSelect) {
   projectSelect.addEventListener("change", () => {
     switchProject(projectSelect.value);
@@ -1898,7 +2200,8 @@ async function initializeDemandH5() {
   initEmbedMode();
   if (!(await initSubmitter())) return;
   initDateInputs();
-  switchProject(projectInput.value || DEFAULT_PROJECT_NAME);
+  projectSettings = loadProjectSettings();
+  switchProject(renderProjectSelect(projectInput.value || DEFAULT_PROJECT_NAME));
   const initialPanel = initialPanelName();
   switchPanel(initialPanel);
   refreshCollaborationData({ panelName: initialPanelName() });
