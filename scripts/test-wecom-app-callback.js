@@ -701,12 +701,9 @@ async function main() {
     ]);
     assert.deepEqual(
       requesterFeedbackMessage.templateCard.horizontal_content_list.map((item) => item.keyname),
-      ["被盯梢人", "盯梢时间", "最新反馈", "反馈时间", "下次盯梢", "任务ID", "详情"]
+      ["被盯梢人", "盯梢时间", "反馈时间", "下次盯梢", "任务ID", "详情"]
     );
-    assert.equal(
-      requesterFeedbackMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "最新反馈").value,
-      "责任同事：正常推进"
-    );
+    assert.equal(requesterFeedbackMessage.templateCard.horizontal_content_list.length, 6);
     assert.equal(
       requesterFeedbackMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情").value,
       "查看盯梢详情"
@@ -790,6 +787,250 @@ async function main() {
     assert.equal(expiredFeedbackDuplicate.ok, true);
     assert.equal(expiredFeedbackDuplicate.duplicate, true);
     assert.equal(expiredFeedbackMessages.length, 1, "超过撤回期限的反馈重试不能重复推送");
+
+    const pageFeedbackStoreFile = path.join(directory, "page-feedback-card-merge-tasks.json");
+    const pageFeedbackCardTaskId = "ea_watch_wd_page_feedback_merge_1788420000001";
+    const pageRepairCardTaskId = "ea_watch_wd_page_feedback_repair_1788420000002";
+    const pageRepairFeedbackTaskId = "ea_watch_wd_page_feedback_repair_1788420000003";
+    const pageCardSentAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const pageRepairResponseAt = new Date().toISOString();
+    fs.writeFileSync(pageFeedbackStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_page_feedback_merge", {
+        nextRunAt: "2099-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        appFeedbackToken: "page-feedback-token",
+        appPushMessages: [{
+          msgid: "page-assignee-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "assignee",
+          cardTaskId: pageFeedbackCardTaskId,
+          linkedCardTaskId: "",
+          readState: "new",
+          replacesMessageId: ""
+        }, {
+          msgid: "page-requester-new-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "requester",
+          cardTaskId: "ea_watch_control_wd_page_feedback_merge_current",
+          linkedCardTaskId: pageFeedbackCardTaskId,
+          readState: "new",
+          replacesMessageId: ""
+        }]
+      }), fixture("wd_page_feedback_repair", {
+        nextRunAt: "2099-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        appPushMessages: [{
+          msgid: "repair-assignee-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "assignee",
+          cardTaskId: pageRepairCardTaskId,
+          linkedCardTaskId: "",
+          readState: "new",
+          replacesMessageId: ""
+        }, {
+          msgid: "repair-requester-new-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "requester",
+          cardTaskId: "ea_watch_control_wd_page_feedback_repair_current",
+          linkedCardTaskId: pageRepairCardTaskId,
+          readState: "new",
+          replacesMessageId: ""
+        }],
+        responses: [{
+          receivedAt: pageRepairResponseAt,
+          eventKey: "ea_watch_progress",
+          label: "正常推进",
+          senderUserId: "assignee",
+          cardTaskId: pageRepairFeedbackTaskId,
+          source: "wecom-app",
+          note: "修复前已经独立发送"
+        }],
+        appResultNoticeSentAt: pageCardSentAt,
+        appResultNoticeMessageId: "repair-separate-feedback-message",
+        appResultNoticeResponseAt: pageRepairResponseAt
+      })],
+      drafts: []
+    }, null, 2)}\n`, "utf8");
+    const pageFeedbackMessages = [];
+    const pageFeedbackRecalledMessageIds = [];
+    const pageFeedbackWatchdog = createWatchdogModule({
+      storeFile: pageFeedbackStoreFile,
+      moduleConfig: {
+        enabled: true,
+        appPush: {
+          enabled: true,
+          corpIdEnv: "TEST_FEEDBACK_CORP_ID",
+          agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
+          secretEnv: "TEST_FEEDBACK_SECRET",
+          nativeCard: { enabled: true }
+        }
+      },
+      appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
+      appNotifier: {
+        getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
+        send: async (message) => {
+          pageFeedbackMessages.push(message);
+          return { ok: true, msgid: `page-feedback-${pageFeedbackMessages.length}` };
+        },
+        recallMessage: async (message) => {
+          pageFeedbackRecalledMessageIds.push(message.msgid);
+          return { ok: true, msgid: message.msgid };
+        }
+      },
+      logger: { info() {}, warn() {} }
+    });
+    const pageReceipt = await pageFeedbackWatchdog.submitAppFeedback({
+      taskId: "wd_page_feedback_merge",
+      token: "page-feedback-token",
+      action: "received",
+      note: ""
+    });
+    assert.equal(pageReceipt.ok, true);
+    assert.deepEqual(pageFeedbackRecalledMessageIds, ["page-requester-new-message"]);
+    assert.equal(pageFeedbackMessages[0].purpose, "watchdog_requester_status_received");
+    assert.equal(pageFeedbackMessages[0].templateCard.source.desc.includes("NEW"), false);
+
+    const pageProgress = await pageFeedbackWatchdog.submitAppFeedback({
+      taskId: "wd_page_feedback_merge",
+      token: "page-feedback-token",
+      action: "progress",
+      note: "反馈页提交后合并"
+    });
+    assert.equal(pageProgress.ok, true);
+    assert.deepEqual(pageFeedbackRecalledMessageIds, ["page-requester-new-message", "page-feedback-1"]);
+    assert.equal(pageFeedbackMessages.length, 2);
+    assert.equal(pageFeedbackMessages[1].purpose, "watchdog_requester_feedback_merged");
+    assert.deepEqual(pageFeedbackMessages[1].templateCard.button_list, [
+      { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
+    ]);
+    assert.equal(pageFeedbackMessages.some((message) => message.purpose === "watchdog_result_notice"), false);
+    const pageFeedbackTask = taskById(pageFeedbackStoreFile, "wd_page_feedback_merge");
+    assert.equal(pageFeedbackTask.responses.length, 1);
+    assert.notEqual(pageFeedbackTask.responses[0].cardTaskId, pageFeedbackCardTaskId);
+    assert.equal(pageFeedbackTask.appPushMessages.at(-1).linkedCardTaskId, pageFeedbackCardTaskId);
+    assert.equal(pageFeedbackTask.appPushMessages.at(-1).readState, "feedback");
+
+    await pageFeedbackWatchdog.tick();
+    assert.deepEqual(pageFeedbackRecalledMessageIds.slice(-2), [
+      "repair-requester-new-message",
+      "repair-separate-feedback-message"
+    ]);
+    const repairedTask = taskById(pageFeedbackStoreFile, "wd_page_feedback_repair");
+    assert.ok(repairedTask.appResultNoticeRecalledAt);
+    assert.equal(repairedTask.appResultNoticeRecallLastError, "");
+    assert.equal(pageFeedbackMessages.at(-1).purpose, "watchdog_requester_feedback_merged");
+    assert.deepEqual(pageFeedbackMessages.at(-1).templateCard.button_list, [
+      { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
+    ]);
+
+    const mergeRetryStoreFile = path.join(directory, "feedback-card-merge-retry-tasks.json");
+    const mergeRetryAssigneeCardTaskId = "ea_watch_wd_feedback_merge_retry_1788420000004";
+    const mergeRetryFeedbackCardTaskId = "ea_watch_wd_feedback_merge_retry_1788420000005";
+    const mergeRetryResponseAt = new Date().toISOString();
+    fs.writeFileSync(mergeRetryStoreFile, `${JSON.stringify({
+      tasks: [fixture("wd_feedback_merge_retry", {
+        nextRunAt: "2099-08-14T05:00:00.000Z",
+        firstReminderSentAt: "2026-08-14T04:00:00.000Z",
+        initialAckStatus: "received",
+        initialAckAt: "2026-08-14T04:00:00.000Z",
+        appPushMessages: [{
+          msgid: "merge-retry-assignee-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "assignee",
+          cardTaskId: mergeRetryAssigneeCardTaskId,
+          linkedCardTaskId: "",
+          readState: "new",
+          replacesMessageId: ""
+        }, {
+          msgid: "merge-retry-requester-message",
+          sentAt: pageCardSentAt,
+          tipType: "watchdog_progress",
+          messageType: "template_card",
+          targetRole: "requester",
+          cardTaskId: "ea_watch_control_wd_feedback_merge_retry_1788420000006",
+          linkedCardTaskId: mergeRetryAssigneeCardTaskId,
+          readState: "new",
+          replacesMessageId: ""
+        }],
+        responses: [{
+          receivedAt: mergeRetryResponseAt,
+          eventKey: "ea_watch_progress",
+          label: "正常推进",
+          senderUserId: "assignee",
+          cardTaskId: mergeRetryFeedbackCardTaskId,
+          source: "wecom-app",
+          note: "首次补发失败后重试"
+        }]
+      })],
+      drafts: []
+    }, null, 2)}\n`, "utf8");
+    const mergeRetryRecalls = [];
+    let mergeRetrySendCount = 0;
+    const mergeRetryWatchdog = createWatchdogModule({
+      storeFile: mergeRetryStoreFile,
+      moduleConfig: {
+        enabled: true,
+        appPush: {
+          enabled: true,
+          corpIdEnv: "TEST_FEEDBACK_CORP_ID",
+          agentIdEnv: "TEST_FEEDBACK_AGENT_ID",
+          secretEnv: "TEST_FEEDBACK_SECRET",
+          nativeCard: { enabled: true }
+        }
+      },
+      appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
+      appNotifier: {
+        getStatus: () => ({ configured: true, nativeCard: { ready: true } }),
+        recallMessage: async (message) => {
+          mergeRetryRecalls.push(message.msgid);
+          return { ok: true, msgid: message.msgid };
+        },
+        send: async () => {
+          mergeRetrySendCount += 1;
+          if (mergeRetrySendCount === 1) {
+            throw new Error("isolated replacement send failure");
+          }
+          return { ok: true, msgid: "merge-retry-replacement-message" };
+        }
+      },
+      logger: { info() {}, warn() {} }
+    });
+    const mergeRetryInput = {
+      taskId: "wd_feedback_merge_retry",
+      cardTaskId: mergeRetryAssigneeCardTaskId,
+      feedbackCardTaskId: mergeRetryFeedbackCardTaskId,
+      label: "正常推进",
+      note: "首次补发失败后重试",
+      responseAt: mergeRetryResponseAt
+    };
+    const firstMergeAttempt = await mergeRetryWatchdog.syncAppRequesterFeedbackCardState(mergeRetryInput);
+    assert.equal(firstMergeAttempt.ok, false);
+    assert.equal(firstMergeAttempt.queued, true);
+    assert.deepEqual(mergeRetryRecalls, ["merge-retry-requester-message"]);
+    let mergeRetryTask = taskById(mergeRetryStoreFile, "wd_feedback_merge_retry");
+    assert.equal(mergeRetryTask.pendingRequesterFeedbackCardSync.feedbackCardTaskId, mergeRetryFeedbackCardTaskId);
+    assert.ok(mergeRetryTask.appPushMessages[1].recalledAt);
+    const secondMergeAttempt = await mergeRetryWatchdog.syncAppRequesterFeedbackCardState(mergeRetryInput);
+    assert.equal(secondMergeAttempt.ok, true);
+    assert.deepEqual(mergeRetryRecalls, ["merge-retry-requester-message"]);
+    assert.equal(mergeRetrySendCount, 2);
+    mergeRetryTask = taskById(mergeRetryStoreFile, "wd_feedback_merge_retry");
+    assert.equal(mergeRetryTask.pendingRequesterFeedbackCardSync, null);
+    assert.equal(mergeRetryTask.appPushMessages.at(-1).msgid, "merge-retry-replacement-message");
 
     const feedbackPageScript = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.js"), "utf8");
     const feedbackPageHtml = fs.readFileSync(path.join(__dirname, "..", "src", "admin", "static", "watchdog-feedback.html"), "utf8");
@@ -931,11 +1172,12 @@ async function main() {
     assert.equal(feedback.task.feedbackHistory[0].label, "正常推进");
     assert.equal(feedback.task.feedbackHistory[0].note, "联调完成，正在观察运行情况");
     assert.ok(linkedMessages.some((message) => (
-      message.purpose === "watchdog_result_notice"
+      message.purpose === "watchdog_requester_feedback_merged"
       && message.messageType === "template_card"
       && message.templateCard
-      && message.templateCard.main_title.title === "责任同事：正常推进"
+      && message.templateCard.main_title.desc === "责任同事：正常推进"
       && message.templateCard.sub_title_text === "当前情况：联调完成，正在观察运行情况"
+      && message.templateCard.button_list.some((button) => button.text === "取消盯梢")
     )));
     for (const expectedTitle of ["责任同事：遇到困难", "责任同事：需要延期", "责任同事：拒绝盯梢"]) {
       assert.ok(linkedMessages.some((message) => (
