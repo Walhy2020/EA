@@ -138,6 +138,85 @@ assert.deepStrictEqual(
   ],
   "顶层 recordId 的 H5 任务必须按需求合并，不能全部折叠为一条"
 );
+
+const fieldRuleSettings = {
+  personAliases: {},
+  rules: {
+    requiredFields: {
+      fallbackOwner: "王谦",
+      fallbackOwners: ["王谦", "李晶晶"],
+      leaders: {
+        UI组长: { names: ["王谦"] },
+        前端组长: { sourceField: "前端组长" },
+        后端组长: { sourceField: "后端组长" }
+      },
+      fieldRules: [
+        { field: "UI需求", leaderRole: "UI组长" },
+        { field: "UI进度", leaderRole: "UI组长" },
+        { field: "前端剩余", leaderRole: "前端组长" },
+        { field: "后端剩余", leaderRole: "后端组长" }
+      ]
+    }
+  }
+};
+const fallbackRoleCache = {
+  requiredItems: [
+    {
+      recordId: "r-wang-ui",
+      demandId: "D-WANG-UI",
+      ownerName: "王谦",
+      ownerType: "fallback",
+      missingFields: ["UI需求", "UI进度", "前端剩余", "后端剩余"]
+    },
+    {
+      recordId: "r-zhao-1",
+      demandId: "D-ZHAO-1",
+      ownerName: "赵琛",
+      missingFields: ["前端剩余"]
+    },
+    {
+      recordId: "r-zhao-2",
+      demandId: "D-ZHAO-2",
+      ownerName: "赵琛",
+      missingFields: ["前端剩余"]
+    }
+  ]
+};
+const wangPersonalItems = __test.requiredFieldLeaderViewItems(
+  fallbackRoleCache,
+  fieldRuleSettings,
+  "王谦"
+);
+assert.deepStrictEqual(
+  comparable(wangPersonalItems),
+  [{
+    recordId: "r-wang-ui",
+    demandId: "D-WANG-UI",
+    missingFields: ["UI需求", "UI进度"]
+  }],
+  "总兜底人个人字段页必须只保留其明确配置的 UI 组长字段"
+);
+assert.deepStrictEqual(
+  [...__test.leaderRequiredFieldSetForPerson(
+    "王谦",
+    {},
+    undefined,
+    fieldRuleSettings.rules.requiredFields
+  )],
+  ["UI需求", "UI进度"],
+  "总兜底身份不能把前端和后端动态组长字段带入个人页"
+);
+assert.strictEqual(
+  __test.requiredFieldLeaderViewItems(fallbackRoleCache, fieldRuleSettings, "李晶晶").length,
+  0,
+  "仅具有总兜底身份的人员不应在个人字段页看到全部字段"
+);
+assert.deepStrictEqual(
+  __test.requiredFieldLeaderViewItems(fallbackRoleCache, fieldRuleSettings, "赵琛")
+    .map((item) => item.recordId),
+  ["r-zhao-1", "r-zhao-2"],
+  "动态组长的多条需求必须保持独立，不能合并为一条"
+);
 console.log(JSON.stringify({
   passed: true,
   checks: {
@@ -147,6 +226,8 @@ console.log(JSON.stringify({
     duplicateDemandMergesMissingFields: true,
     flattenedH5ItemsKeepDistinctDemands: true,
     noSelectionKeepsFallbackResidualItems: true,
-    projectFilterKeepsLeaderParity: true
+    projectFilterKeepsLeaderParity: true,
+    fallbackOwnerPersonalRoleSeparated: true,
+    allDynamicLeaderRecordsRemainDistinct: true
   }
 }, null, 2));

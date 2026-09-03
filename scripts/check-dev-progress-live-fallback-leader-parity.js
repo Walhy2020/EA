@@ -11,13 +11,14 @@ const cachePath = path.resolve(__dirname, "..", "data", "dev-progress", "h5-moni
 const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
 const settings = getDevProgressSettings();
 const configuredLeaderNames = filter.uniqueNames((cache.fallbackLeaderFilters || []).map((item) => item.name));
-const requestedLeaderNames = filter.uniqueNames([
-  "高文盛",
-  configuredLeaderNames.find((name) => name !== "高文盛")
-]);
+const fixedRuleLeaderNames = filter.uniqueNames(Object.values(settings.rules?.requiredFields?.leaders || {})
+  .flatMap((leader) => Array.isArray(leader && leader.names) ? leader.names : []));
+const requestedLeaderNames = filter.uniqueNames([...configuredLeaderNames, ...fixedRuleLeaderNames]);
+const expectedLeaderNames = ["时振兴", "胡锦南", "赵琛", "王文静", "高文盛", "王谦", "刘晓明"];
 
-assert(requestedLeaderNames.includes("高文盛"), "当前缓存未配置高文盛组长筛选项");
-assert(requestedLeaderNames.length >= 2, "当前缓存没有可用于通用性验证的第二名组长");
+for (const leaderName of expectedLeaderNames) {
+  assert(requestedLeaderNames.includes(leaderName), `当前规则或缓存未配置组长：${leaderName}`);
+}
 
 function canonical(items) {
   return filter.mergeVisibleItems(items)
@@ -44,19 +45,46 @@ function differences(left, right) {
 const allFallbackLeaderItems = __test.fallbackLeaderViewItems(cache, settings, null);
 const parityResults = [];
 for (const leaderName of requestedLeaderNames) {
-  const fieldItems = canonical(__test.requiredFieldLeaderViewItems(cache, settings, leaderName, null));
+  const rawFieldItems = __test.requiredFieldLeaderViewItems(cache, settings, leaderName, null);
+  const fieldItems = canonical(rawFieldItems);
+  const directItems = (cache.requiredItems || []).filter((item) => (
+    String(item.ownerName || "").trim() === leaderName
+    && !item.isFallbackOwner
+    && !item.fallbackOwner
+    && item.ownerType !== "fallback"
+  ));
+  const personalItems = __test.mergeRequiredFieldViewItems([...directItems, ...rawFieldItems]);
   const fallbackItems = canonical(filter.visibleItems(allFallbackLeaderItems, [leaderName]));
   const difference = differences(fieldItems, fallbackItems);
+  const uniqueRecordCount = new Set(rawFieldItems.map((item) => item.recordId).filter(Boolean)).size;
+  const personalUniqueRecordCount = new Set(personalItems.map((item) => item.recordId).filter(Boolean)).size;
   parityResults.push({
     leaderName,
+    personalCount: personalItems.length,
+    personalUniqueRecordCount,
     fieldCount: fieldItems.length,
+    uniqueRecordCount,
     fallbackFilteredCount: fallbackItems.length,
     onlyFieldDemandIds: difference.onlyLeft,
     onlyFallbackDemandIds: difference.onlyRight,
     differentMissingFieldDemandIds: difference.fieldDifference
   });
+  assert(personalItems.length > 1, `${leaderName} 当前真实个人字段页异常折叠为一条或为空`);
+  assert.strictEqual(personalUniqueRecordCount, personalItems.length, `${leaderName} 当前真实个人字段页存在重复 recordId`);
+  assert(fieldItems.length > 1, `${leaderName} 当前真实字段页异常折叠为一条或为空`);
+  assert.strictEqual(uniqueRecordCount, rawFieldItems.length, `${leaderName} 当前真实字段页存在重复 recordId`);
   assert.deepStrictEqual(difference, { onlyLeft: [], onlyRight: [], fieldDifference: [] }, `${leaderName} 兜底筛选与本人字段页不一致`);
 }
+
+const uiFieldSet = new Set(settings.rules.requiredFields.fieldRules
+  .filter((rule) => rule.leaderRole === "UI组长")
+  .map((rule) => rule.field));
+const wangQianItems = __test.requiredFieldLeaderViewItems(cache, settings, "王谦", null);
+assert(wangQianItems.length > 0, "王谦 UI 组长字段页不应为空");
+assert(
+  wangQianItems.every((item) => (item.missingFields || []).every((fieldName) => uiFieldSet.has(fieldName))),
+  "王谦个人字段页只能包含 UI 组长负责字段，不能混入总兜底字段"
+);
 
 const multiPersonalItems = canonical(requestedLeaderNames.flatMap((leaderName) => (
   __test.requiredFieldLeaderViewItems(cache, settings, leaderName, null)
@@ -90,6 +118,10 @@ console.log(JSON.stringify({
   multiLeader: {
     selectedNames: requestedLeaderNames,
     taskCount: multiFallbackItems.length
+  },
+  wangQianUiScope: {
+    fieldCount: wangQianItems.length,
+    allowedFields: [...uiFieldSet]
   },
   projectParity
 }, null, 2));

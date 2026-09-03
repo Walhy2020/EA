@@ -27,7 +27,7 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
-const H5_MONITOR_CACHE_VERSION = 17;
+const H5_MONITOR_CACHE_VERSION = 18;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {
@@ -683,7 +683,10 @@ function leaderRequiredFieldSetForPerson(personName, personAliases = {}, workflo
         personName,
         personAliases
       ));
-      if (isGlobalFallback || fixedLeaderMatches || String(leader.sourceField || "").trim()) {
+      const usesDynamicLeader = Boolean(String(leader.sourceField || "").trim());
+      // The fallback role grants access only to the fallback page. On the
+      // personal page, a fallback owner keeps only explicitly assigned roles.
+      if (fixedLeaderMatches || (usesDynamicLeader && !isGlobalFallback)) {
         result.add(String(fieldRule.field || "").trim());
       }
     }
@@ -2875,6 +2878,11 @@ function createDevProgressModule(options = {}) {
       : mergeRequiredFieldViewItems([...directOwnerItems, ...leaderItems]);
 
     if (logger && typeof logger.info === "function") {
+      const isFallbackOwner = requiredFieldFallbackOwners(settings).some((fallbackOwner) => personNameMatches(
+        fallbackOwner,
+        userName,
+        settings.personAliases || {}
+      ));
       logger.info("Dev progress required-field access evaluated", {
         userName,
         itemsOwnerName,
@@ -2884,6 +2892,7 @@ function createDevProgressModule(options = {}) {
         visibleItemCount: items.length,
         leaderRequiredFieldCount: leaderRequiredFieldSet.size,
         deniedNonLeader: !fallbackOnly && leaderRequiredFieldSet.size === 0,
+        fallbackOwnerRoleSeparated: !fallbackOnly && isFallbackOwner,
         fallbackViewer: fallbackOnly && canReadFallbackScope,
         fallbackViewerCount: fallbackOnly ? requiredFieldFallbackViewerNames(settings).length : 0,
         fallbackLeaderFilterCount: fallbackOnly && Array.isArray(cache.fallbackLeaderFilters)
