@@ -170,6 +170,13 @@ function h5EntryRequestMeta(req, url, result) {
     cacheRefreshedAt: String(cache.refreshedAt || ""),
     cacheSignalCheckedAt: String(cache.signalCheckedAt || ""),
     cacheModifyTime: String(cache.modifyTime || ""),
+    cachePartialRefreshedAt: String(cache.partialRefreshedAt || ""),
+    cachePartialRefreshedCount: Number(cache.partialRefreshedCount || 0),
+    cacheRecentInteractionCount: Number(cache.recentInteractionCount || 0),
+    cacheSignalUnchanged: Boolean(cache.signalUnchanged),
+    cacheBackgroundSyncStarted: Boolean(cache.backgroundSyncStarted),
+    cacheSignalError: String(cache.signalError || "").slice(0, 300),
+    cacheRefreshError: String(cache.refreshError || "").slice(0, 300),
     cacheRefreshInProgress: Boolean(cache.refreshInProgress),
     cacheNeedsRefresh: Boolean(cache.needsRefresh),
     ok: Boolean(result && result.ok)
@@ -2054,6 +2061,37 @@ function createAdminServer(options) {
       sendJson(res, 200, {
         ok: result.ok,
         devProgress: result
+      });
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/dev-progress/recent-task-interaction") {
+      const identity = requireDemandH5Identity(req, res, url.pathname);
+      if (!identity) return true;
+      const body = await readRequestBody(req);
+      const result = modules.devProgress.recordRecentTaskInteraction({
+        userName: identity.name,
+        recordId: body.recordId,
+        demandId: body.demandId,
+        project: body.project,
+        action: body.action
+      });
+      logger.info("Demand H5 recent task interaction requested", {
+        entryId: String(req.headers["x-ea-demand-entry-id"] || "").slice(0, 80),
+        pageVersion: String(req.headers["x-ea-demand-page-version"] || "").slice(0, 32),
+        sessionId: identity.sessionId,
+        userName: identity.name,
+        taskId: String(body.demandId || "").slice(0, 160),
+        recordId: String(body.recordId || "").slice(0, 160),
+        project: String(body.project || "").slice(0, 80),
+        action: String(body.action || "").slice(0, 40),
+        retainedCount: Number(result.retainedCount || 0),
+        ok: Boolean(result.ok)
+      });
+      sendJson(res, result.ok ? 200 : 400, {
+        ok: result.ok,
+        devProgress: result,
+        message: result.message || ""
       });
       return true;
     }

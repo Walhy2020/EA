@@ -29,9 +29,9 @@ assert.strictEqual(draftDirection, true);
 assert.strictEqual(fallbackDirection, false);
 assert.deepStrictEqual(sort.sortByCreatedTime(source.filter((item) => item.id !== "later"), draftDirection).map((item) => item.id), ["same-a", "same-b", "early", "invalid", "empty"]);
 
-const h5Html = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.html"), "utf8");
-const h5Js = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.js"), "utf8");
-const h5Css = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.css"), "utf8");
+const h5Html = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.html"), "utf8").replace(/\r\n/g, "\n");
+const h5Js = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.js"), "utf8").replace(/\r\n/g, "\n");
+const h5Css = fs.readFileSync(path.resolve(__dirname, "..", "src", "admin", "static", "demand-h5.css"), "utf8").replace(/\r\n/g, "\n");
 const draftTabStart = h5Html.indexOf('id="draftTabButton"');
 const fallbackTabStart = h5Html.indexOf('id="fallbackTabButton"');
 const draftPanelStart = h5Html.indexOf('id="panel-draft"');
@@ -42,7 +42,7 @@ assert(!h5Html.includes('id="draftCreatedTimeSort"') && !h5Html.includes('id="fa
 assert(/id="draftTabButton"[\s\S]*?class="tab-title-count"[\s\S]*?id="draftCountOutput"[\s\S]*?class="created-time-sort"/.test(h5Html), "字段待补充页签应包含不可拆分的标题数量组和三横杠状态图标");
 assert(/id="fallbackTabButton"[\s\S]*?class="tab-title-count"[\s\S]*?id="fallbackCountOutput"[\s\S]*?class="created-time-sort"/.test(h5Html), "兜底需求页签应包含不可拆分的标题数量组和三横杠状态图标");
 assert(h5Html.includes('aria-hidden="true"'), "三横杠必须仅作为状态图标");
-assert(h5Js.includes('switchPanel(panelName);\n    if (panelName === "draft" || panelName === "fallback") {\n      toggleCreatedTimeSort(panelName);'), "目标页签单击必须同时激活并切换排序");
+assert(/switchPanel\(panelName\);\r?\n\s+if \(panelName === "draft" \|\| panelName === "fallback"\) \{\r?\n\s+toggleCreatedTimeSort\(panelName\);/.test(h5Js), "目标页签单击必须同时激活并切换排序");
 assert(!h5Js.includes('draftCreatedTimeSort') && !h5Js.includes('fallbackCreatedTimeSort'), "不能保留独立排序按钮事件");
 assert(h5Css.includes('.tab-button-with-sort[data-newest-first="true"] .created-time-sort'), "三横杠方向必须从完整页签排序状态读取");
 assert(h5Css.includes('grid-template-columns: 32px minmax(0, 1fr) 32px;'), "左右等宽预留必须保证居中参照是完整页签");

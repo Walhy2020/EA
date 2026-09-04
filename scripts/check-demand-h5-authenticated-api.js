@@ -92,6 +92,10 @@ async function main() {
       }
     },
     devProgress: {
+      recordRecentTaskInteraction: (options) => {
+        captured.recentTaskInteraction = options;
+        return { ok: true, retainedCount: 1 };
+      },
       listRequiredFieldItems: async (options) => {
         captured.requiredFields = options;
         return { ok: true, items: [] };
@@ -194,6 +198,20 @@ async function main() {
     assert.strictEqual(captured.requiredFields.userName, "李晶晶");
     assert.strictEqual(captured.requiredFields.scope, "fallback");
 
+    const unsignedRecentTask = await request(port, "/api/dev-progress/recent-task-interaction", {
+      method: "POST",
+      body: { recordId: "record-1", demandId: "D1" }
+    });
+    assert.strictEqual(unsignedRecentTask.statusCode, 401);
+    const signedRecentTask = await request(port, "/api/dev-progress/recent-task-interaction", {
+      method: "POST",
+      cookie,
+      body: { userName: "高文盛", recordId: "record-1", demandId: "D1", project: "恶魔高校", action: "open_task" }
+    });
+    assert.strictEqual(signedRecentTask.statusCode, 200);
+    assert.strictEqual(captured.recentTaskInteraction.userName, "李晶晶");
+    assert.strictEqual(captured.recentTaskInteraction.recordId, "record-1");
+
     await request(port, "/api/demand-collaboration/drafts", {
       method: "POST",
       cookie,
@@ -230,6 +248,8 @@ async function main() {
         unauthenticatedApiRejected: true,
         signedIdentityReturned: true,
         queryNameImpersonationBlocked: true,
+        recentTaskRequiresSignedIdentity: true,
+        recentTaskBodyIdentityIgnored: true,
         draftNameImpersonationBlocked: true,
         supplementNameImpersonationBlocked: true,
         pcQrLoginRedirectCreated: true,

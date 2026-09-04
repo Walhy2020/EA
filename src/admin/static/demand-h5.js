@@ -78,7 +78,7 @@ const leaderSupplementTitle = document.getElementById("leaderSupplementTitle");
 const leaderSupplementFields = document.getElementById("leaderSupplementFields");
 const DEFAULT_PROJECT_NAME = "恶魔高校";
 const FALLBACK_VIEWER_NAMES = new Set(["王谦", "李晶晶"]);
-const H5_PAGE_VERSION = "0.3.2";
+const H5_PAGE_VERSION = "0.3.3";
 const ENTRY_CONTEXT = window.EADemandEntryContext || {};
 const FALLBACK_LEADER_FILTER_API = window.EADemandFallbackLeaderFilter || null;
 const DEMAND_LOCATOR_NAVIGATION = window.EADemandLocatorNavigation || null;
@@ -139,6 +139,8 @@ let collaborationLoadPromise = null;
 let lastForegroundRefreshAt = 0;
 let scrollPositionSaveTimer = 0;
 let manualRefreshInProgress = false;
+let backgroundRefreshPollTimer = 0;
+let backgroundRefreshPollAttempts = 0;
 let projectSettings = null;
 let projectSettingsDraft = null;
 const panelScrollPositions = {};
@@ -489,6 +491,10 @@ function updateDataStatus(refreshedAt) {
   dataStatus.textContent = displayText ? `数据更新时间：${displayText}` : "数据更新时间：读取中";
 }
 
+function cacheDisplayTime(cache) {
+  return cache && (cache.partialRefreshedAt || cache.refreshedAt) || "";
+}
+
 function nextWeekDateText(weekday, date = new Date()) {
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const daysToNextMonday = (8 - start.getDay()) % 7 || 7;
@@ -710,6 +716,30 @@ function makeTaskCardInteractive(card) {
   });
 }
 
+function recordRecentTaskInteraction(item, action) {
+  const recordId = String(item && item.recordId || "").trim();
+  if (!recordId) {
+    return Promise.resolve(null);
+  }
+  return requestJson("/api/dev-progress/recent-task-interaction", {
+    method: "POST",
+    body: {
+      recordId,
+      demandId: String(item && item.demandId || "").trim(),
+      project: String(item && item.project || "").trim(),
+      action: String(action || "open")
+    }
+  }).catch((error) => {
+    console.warn("Demand H5 recent task interaction record failed", {
+      recordId,
+      demandId: String(item && item.demandId || "").trim(),
+      action: String(action || "open"),
+      message: error && error.message ? error.message : String(error || "")
+    });
+    return null;
+  });
+}
+
 function appendTaskIdCopyButton(card, item) {
   const taskId = TASK_ID_COPY_API ? TASK_ID_COPY_API.taskIdForItem(item) : "";
   if (!taskId) {
@@ -727,6 +757,7 @@ function appendTaskIdCopyButton(card, item) {
   button.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
+    recordRecentTaskInteraction(item, "copy_task_id");
     const result = await TASK_ID_COPY_API.copyTaskId(taskId, copyText);
     console.info("Demand H5 task ID copy finished", {
       userName: currentUserName(),
@@ -769,6 +800,7 @@ function showDemandLocatorResult(demandId, result) {
 function openDemandLocator(item) {
   const demandId = String(item && item.demandId ? item.demandId : "").trim();
   const demandTableUrl = String(item && (item.demandTableUrl || item.demandUrl) ? (item.demandTableUrl || item.demandUrl) : "").trim();
+  recordRecentTaskInteraction(item, "open_task");
   const result = DEMAND_LOCATOR_NAVIGATION
     ? DEMAND_LOCATOR_NAVIGATION.copyThenOpen({
       demandId,
@@ -1114,7 +1146,7 @@ async function loadDraftsFromServer(options = {}) {
     if (options.waitForRefresh) params.set("waitForRefresh", "1");
     const result = await requestJson(`/api/dev-progress/required-field-items?${params.toString()}`);
     const devProgress = result.devProgress || {};
-    updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
+    updateDataStatus(cacheDisplayTime(devProgress.cache));
     replaceRequiredFieldItems(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []));
     return devProgress.cache || null;
   } catch (error) {
@@ -1136,7 +1168,7 @@ async function loadFallbackItemsFromServer(options = {}) {
     appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/required-field-items?${params.toString()}`);
     const devProgress = result.devProgress || {};
-    updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
+    updateDataStatus(cacheDisplayTime(devProgress.cache));
     replaceFallbackLeaderFilters(devProgress.leaderFilters);
     replaceFallbackRequiredFieldItems(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []));
     return devProgress.cache || null;
@@ -1154,7 +1186,7 @@ async function loadTodosFromServer(options = {}) {
     appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/person-tasks?${params.toString()}`);
     const devProgress = result.devProgress || {};
-    updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
+    updateDataStatus(cacheDisplayTime(devProgress.cache));
     replaceTodos(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []).map((item) => ({
       ...item,
       source: "dev_progress"
@@ -1174,7 +1206,7 @@ async function loadMemberTodosFromServer(options = {}) {
     appendSelectedProject(params);
     const result = await requestJson(`/api/dev-progress/member-tasks?${params.toString()}`);
     const devProgress = result.devProgress || {};
-    updateDataStatus(devProgress.cache && devProgress.cache.refreshedAt);
+    updateDataStatus(cacheDisplayTime(devProgress.cache));
     currentUserLeaderRoles = Array.isArray(devProgress.leaderRoles) ? devProgress.leaderRoles : [];
     memberTodoMessage = devProgress.message || "";
     replaceMemberTodos(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []).map((item) => ({
@@ -1193,8 +1225,10 @@ async function loadMemberTodosFromServer(options = {}) {
 }
 
 async function loadTodoDataFromServer(options = {}) {
-  await loadTodosFromServer(options);
-  await loadMemberTodosFromServer(options);
+  await Promise.all([
+    loadTodosFromServer(options),
+    loadMemberTodosFromServer(options)
+  ]);
   renderTodoPanel();
 }
 
@@ -1204,8 +1238,12 @@ async function loadCollaborationData(options = {}) {
     waitForRefresh: Boolean(options.forceRefresh || options.waitForRefresh),
     throwOnError: Boolean(options.throwOnError)
   });
-  await loadFallbackItemsFromServer(options);
-  await loadTodoDataFromServer(options);
+  await Promise.all([
+    loadFallbackItemsFromServer(options),
+    loadTodosFromServer(options),
+    loadMemberTodosFromServer(options)
+  ]);
+  renderTodoPanel();
   return { cache };
 }
 
@@ -1242,6 +1280,50 @@ function refreshAfterPageResume() {
   refreshCollaborationData({ panelName: activePanelName() });
 }
 
+function scheduleBackgroundRefreshPoll() {
+  window.clearTimeout(backgroundRefreshPollTimer);
+  backgroundRefreshPollTimer = window.setTimeout(async () => {
+    if (manualRefreshInProgress || collaborationLoadPromise) {
+      scheduleBackgroundRefreshPoll();
+      return;
+    }
+    try {
+      const cache = await loadDraftsFromServer({ throwOnError: true });
+      if (cache && cache.refreshInProgress) {
+        if (backgroundRefreshPollAttempts < 30) {
+          backgroundRefreshPollAttempts += 1;
+          scheduleBackgroundRefreshPoll();
+        } else {
+          showToast("需求总表仍在后台同步，请稍后查看");
+        }
+        return;
+      }
+      if (cache && cache.refreshError) {
+        backgroundRefreshPollAttempts = 0;
+        showToast("需求总表后台同步失败，当前保留上次成功数据");
+        return;
+      }
+      await Promise.all([
+        loadFallbackItemsFromServer({ throwOnError: true }),
+        loadTodosFromServer({ throwOnError: true }),
+        loadMemberTodosFromServer({ throwOnError: true })
+      ]);
+      renderTodoPanel();
+      backgroundRefreshPollAttempts = 0;
+      showToast("需求总表后台同步完成");
+    } catch (error) {
+      console.warn("Demand H5 background refresh poll failed", {
+        attempt: backgroundRefreshPollAttempts,
+        message: error && error.message ? error.message : String(error || "")
+      });
+      if (backgroundRefreshPollAttempts < 30) {
+        backgroundRefreshPollAttempts += 1;
+        scheduleBackgroundRefreshPoll();
+      }
+    }
+  }, 2000);
+}
+
 async function performManualRefresh() {
   if (manualRefreshInProgress || collaborationLoadPromise) return;
   const previousRefreshedAt = latestCacheRefreshedAt;
@@ -1260,16 +1342,41 @@ async function performManualRefresh() {
       manual: true,
       throwOnError: true
     });
-    const refreshedAt = result && result.cache ? String(result.cache.refreshedAt || "") : "";
-    if (!refreshedAt || refreshedAt === previousRefreshedAt) {
-      throw new Error("未能读取最新需求总表，当前仍显示上一次成功数据");
+    const cache = result && result.cache ? result.cache : null;
+    if (!cache) {
+      throw new Error("未能读取需求监控缓存");
+    }
+    const refreshedAt = String(cache.partialRefreshedAt || cache.refreshedAt || "");
+    if (cache.signalError && Number(cache.partialRefreshedCount || 0) === 0) {
+      throw new Error(`需求总表变更检查失败：${cache.signalError}`);
     }
     console.info("Demand H5 manual refresh completed", {
       project: selectedProjectValue(),
       durationMs: Date.now() - startedAt,
-      refreshedAt
+      refreshedAt,
+      recentInteractionCount: Number(cache.recentInteractionCount || 0),
+      partialRefreshedCount: Number(cache.partialRefreshedCount || 0),
+      signalUnchanged: Boolean(cache.signalUnchanged),
+      backgroundSyncStarted: Boolean(cache.backgroundSyncStarted)
     });
-    showToast("已读取最新需求总表");
+    if (cache.signalError) {
+      showToast("最近操作任务已更新，但总表变更检查失败");
+    } else if (cache.partialError) {
+      throw new Error(cache.partialError);
+    } else if (cache.backgroundSyncStarted) {
+      const count = Number(cache.partialRefreshedCount || 0);
+      showToast(count > 0
+        ? `已优先更新最近操作的 ${count} 条任务，其他数据正在后台同步`
+        : "已开始后台同步最新需求总表");
+      backgroundRefreshPollAttempts = 0;
+      scheduleBackgroundRefreshPoll();
+    } else if (Number(cache.partialRefreshedCount || 0) > 0) {
+      showToast(`已更新最近操作的 ${Number(cache.partialRefreshedCount)} 条任务`);
+    } else if (cache.signalUnchanged) {
+      showToast("当前已是最新数据");
+    } else {
+      showToast("已读取最新需求总表");
+    }
   } catch (error) {
     updateDataStatus(previousRefreshedAt);
     console.warn("Demand H5 manual refresh failed", {

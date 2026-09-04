@@ -58,13 +58,16 @@ assert(html.includes('id="projectSettingsDialog"'), "页面必须包含项目设
 assert(html.includes('id="showAllProjectsInput"'), "项目设置必须支持启用全部项目");
 assert(html.includes('id="allProjectsOptions"'), "项目设置必须支持配置全部项目包含范围");
 assert(html.includes('id="projectOrderList"'), "项目设置必须支持调整项目顺序");
-assert(/demand-project-settings\.js\?v=0\.3\.2[\s\S]*demand-h5\.js\?v=0\.3\.2/.test(html), "项目设置模块必须先于主页面脚本加载");
-assert(js.includes('const H5_PAGE_VERSION = "0.3.2"'), "页面请求必须携带最新版本号");
-assert(js.includes('params.set("forceRefresh", "1")'), "手动刷新必须请求服务端强制刷新");
-assert(js.includes('params.set("waitForRefresh", "1")'), "手动刷新必须等待最新总表扫描完成");
+assert(/demand-project-settings\.js\?v=0\.3\.3[\s\S]*demand-h5\.js\?v=0\.3\.3/.test(html), "项目设置模块必须先于主页面脚本加载");
+assert(js.includes('const H5_PAGE_VERSION = "0.3.3"'), "页面请求必须携带最新版本号");
+assert(js.includes('params.set("forceRefresh", "1")'), "手动刷新必须请求服务端检查总表变更");
+assert(js.includes('params.set("waitForRefresh", "1")'), "手动刷新必须等待最近任务精确刷新完成");
 assert(js.includes('dataStatus.textContent = "数据更新时间：正在读取最新需求总表..."'), "刷新期间必须显示明确状态");
-assert(js.includes('showToast("已读取最新需求总表")'), "刷新成功必须有用户提示");
-assert(js.includes('throw new Error("未能读取最新需求总表，当前仍显示上一次成功数据")'), "旧缓存不得伪装成手动刷新成功");
+assert(js.includes('showToast("当前已是最新数据")'), "总表未变化时必须有即时提示");
+assert(js.includes("其他数据正在后台同步"), "全量校准必须有后台同步提示");
+assert(!js.includes('throw new Error("未能读取最新需求总表，当前仍显示上一次成功数据")'), "总表未变化不应被误报为刷新失败");
+assert(js.includes("await Promise.all([\n    loadFallbackItemsFromServer(options)"), "缓存更新后必须并行读取页面区域");
+assert(js.includes("/api/dev-progress/recent-task-interaction"), "任务操作必须记录最近任务用于精确刷新");
 assert(js.includes("window.localStorage.setItem(PROJECT_SETTINGS_API.STORAGE_KEY"), "项目设置必须持久保存到当前浏览器");
 assert(js.includes("filterItemsForSelectedProject"), "全部项目必须按设置范围过滤");
 assert(css.includes(".project-toolbar") && css.includes("grid-template-columns: minmax(0, 1fr) 40px 40px;"), "项目选择和两个图标按钮必须保持稳定布局");
@@ -73,12 +76,15 @@ assert(server.includes('forceRefresh: url.searchParams.get("forceRefresh") === "
 assert(server.includes('waitForRefresh: url.searchParams.get("waitForRefresh") === "1"'), "服务端日志必须记录等待刷新标记");
 assert(server.includes("cacheRefreshedAt"), "服务端日志必须记录本次返回的缓存更新时间");
 assert(server.includes("cacheModifyTime"), "服务端日志必须记录本次返回的文档修改时间");
+assert(server.includes("cachePartialRefreshedCount"), "服务端日志必须记录精确刷新的任务数量");
+assert(/recent-task-interaction[\s\S]*requireDemandH5Identity/.test(server), "最近任务记录必须使用签名登录身份");
 
 console.log(JSON.stringify({
   passed: true,
   checks: {
-    manualRefreshForcesLatestScan: true,
-    staleRefreshIsNotReportedAsSuccess: true,
+    manualRefreshChecksSignalAndPrioritizesRecentTasks: true,
+    unchangedSignalReturnsCacheImmediately: true,
+    remainingPanelsLoadInParallel: true,
     allProjectToggle: true,
     allProjectMembership: true,
     projectOrderIncludingAll: true,

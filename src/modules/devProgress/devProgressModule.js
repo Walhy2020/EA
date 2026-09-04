@@ -27,6 +27,11 @@ const {
 
 const TASK_QUERY_PATTERN = /(?:任务|需求|进度)/;
 const SCAN_PAGE_SIZE = 500;
+const SCAN_PAGE_CONCURRENCY = 2;
+const FULL_SCAN_REUSE_MS = 30 * 1000;
+const RECENT_TASK_TTL_MS = 30 * 60 * 1000;
+const RECENT_TASK_LIMIT_PER_USER = 20;
+const DEV_PROGRESS_MODULE_VERSION = "0.3.3";
 const H5_MONITOR_CACHE_VERSION = 20;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
@@ -1959,6 +1964,12 @@ function h5CacheMeta(cache, extra = {}) {
     signalCheckedAt: cache && cache.signalCheckedAt ? cache.signalCheckedAt : "",
     signal: cache && cache.signal ? cache.signal : "",
     modifyTime: cache && cache.modifyTime ? cache.modifyTime : "",
+    signalError: cache && cache.lastSignalError ? cache.lastSignalError : "",
+    refreshError: cache && cache.lastRefreshError ? cache.lastRefreshError : "",
+    partialRefreshedAt: cache && cache.partialRefreshedAt ? cache.partialRefreshedAt : "",
+    partialRefreshedCount: cache && cache.partialRefresh
+      ? Number(cache.partialRefresh.requestedRecordCount || 0)
+      : 0,
     source: "h5_monitor_cache",
     requiredItemCount: cache && Array.isArray(cache.requiredItems) ? cache.requiredItems.length : 0,
     personTaskItemCount: cache && Array.isArray(cache.personTaskItems) ? cache.personTaskItems.length : 0,
@@ -1968,6 +1979,19 @@ function h5CacheMeta(cache, extra = {}) {
 
 function createDevProgressModule(options = {}) {
   const logger = options.logger;
+  const settingsProvider = typeof options.getSettings === "function"
+    ? options.getSettings
+    : getDevProgressSettings;
+  const workflowRulesProvider = typeof options.getWorkflowRulesSettings === "function"
+    ? options.getWorkflowRulesSettings
+    : getDemandWorkflowRulesSettings;
+  const fieldDefinitionsReader = typeof options.readFieldDefinitions === "function"
+    ? options.readFieldDefinitions
+    : readDevProgressFieldDefinitions;
+  const workdayCalendarReader = typeof options.readWorkdayCalendar === "function"
+    ? options.readWorkdayCalendar
+    : readDevProgressWorkdayCalendar;
+  const nowMsProvider = typeof options.nowMs === "function" ? options.nowMs : Date.now;
   const anomalyScanOverride = typeof options.runAnomalyScan === "function" ? options.runAnomalyScan : null;
   const documentInfoReader = typeof options.readDocumentInfo === "function"
     ? options.readDocumentInfo
@@ -1978,15 +2002,21 @@ function createDevProgressModule(options = {}) {
   const h5CacheFileWriter = typeof options.writeH5MonitorCacheFile === "function"
     ? options.writeH5MonitorCacheFile
     : writeH5MonitorCacheFile;
+  const recordsReader = typeof options.readRecords === "function"
+    ? options.readRecords
+    : readDevProgressRecords;
   let h5MonitorCache = null;
   let h5MonitorRefreshPromise = null;
+  let fullAnomalyScanPromise = null;
+  let lastFullAnomalyScan = null;
+  const recentTaskInteractions = new Map();
 
-  async function readRecords(readOptions = {}, settings = getDevProgressSettings()) {
-    return readDevProgressRecords(settings, readOptions);
+  async function readRecords(readOptions = {}, settings = settingsProvider()) {
+    return recordsReader(settings, readOptions);
   }
 
   async function getDocumentChangeSignal() {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     return documentInfoReader(settings);
   }
 
@@ -2005,6 +2035,72 @@ function createDevProgressModule(options = {}) {
 
   async function executeAnomalyScan(scanOptions = {}) {
     return anomalyScanOverride ? anomalyScanOverride(scanOptions) : runAnomalyScan(scanOptions);
+  }
+
+  function sharedFullScanKey(scanOptions = {}) {
+    const recordIds = Array.isArray(scanOptions.recordIds) ? scanOptions.recordIds.filter(Boolean) : [];
+    const focusDemandIds = Array.isArray(scanOptions.focusDemandIds) ? scanOptions.focusDemandIds.filter(Boolean) : [];
+    if (recordIds.length > 0 || focusDemandIds.length > 0) {
+      return "";
+    }
+    return JSON.stringify({
+      limit: Number(scanOptions.limit || 0),
+      today: String(scanOptions.today || ""),
+      forceLookupMetadataRefresh: Boolean(scanOptions.forceLookupMetadataRefresh),
+      signal: String(scanOptions.h5MonitorSignal && scanOptions.h5MonitorSignal.signal || scanOptions.changeSignal || "")
+    });
+  }
+
+  async function executeSharedAnomalyScan(scanOptions = {}) {
+    const key = sharedFullScanKey(scanOptions);
+    if (!key) {
+      return executeAnomalyScan(scanOptions);
+    }
+    if (fullAnomalyScanPromise && fullAnomalyScanPromise.key === key) {
+      if (logger && typeof logger.info === "function") {
+        logger.info("Dev progress full scan joined existing request", {
+          limit: Number(scanOptions.limit || 0),
+          source: String(scanOptions.scanSource || "")
+        });
+      }
+      return fullAnomalyScanPromise.promise;
+    }
+    const reuseMs = Math.max(0, Number(scanOptions.reuseRecentFullScanMs === undefined
+      ? FULL_SCAN_REUSE_MS
+      : scanOptions.reuseRecentFullScanMs));
+    const hasDocumentSignal = Boolean(String(
+      scanOptions.h5MonitorSignal && scanOptions.h5MonitorSignal.signal || scanOptions.changeSignal || ""
+    ));
+    if ((hasDocumentSignal || scanOptions.reuseRecentFullScan === true)
+      && lastFullAnomalyScan && lastFullAnomalyScan.key === key
+      && Date.now() - lastFullAnomalyScan.completedAt <= reuseMs) {
+      if (logger && typeof logger.info === "function") {
+        logger.info("Dev progress full scan reused recent result", {
+          limit: Number(scanOptions.limit || 0),
+          source: String(scanOptions.scanSource || ""),
+          ageMs: Date.now() - lastFullAnomalyScan.completedAt,
+          reuseMs
+        });
+      }
+      return lastFullAnomalyScan.result;
+    }
+
+    const promise = executeAnomalyScan(scanOptions).then((result) => {
+      if (result && result.scanResult && result.scanResult.ok) {
+        lastFullAnomalyScan = {
+          key,
+          completedAt: Date.now(),
+          result
+        };
+      }
+      return result;
+    }).finally(() => {
+      if (fullAnomalyScanPromise && fullAnomalyScanPromise.promise === promise) {
+        fullAnomalyScanPromise = null;
+      }
+    });
+    fullAnomalyScanPromise = { key, promise };
+    return promise;
   }
 
   function scanReadPerf(totalMs, pages = []) {
@@ -2048,49 +2144,135 @@ function createDevProgressModule(options = {}) {
     let fieldsUsed = [];
     let userNameResolvedCount = 0;
     const pages = [];
+    let sourceTotal = null;
+    let concurrencyFallbackCount = 0;
 
-    while (records.length < targetLimit) {
-      const pageLimit = Math.min(SCAN_PAGE_SIZE, targetLimit - records.length);
-      const page = await readRecords({
-        limit: pageLimit,
-        offset,
-        recordIds,
-        forceLookupMetadataRefresh: Boolean(readOptions.forceLookupMetadataRefresh && offset === 0)
-      }, settings);
-      if (!page.ok) {
+    const readPage = async (pageOffset, pageLimit, forceLookupMetadataRefresh = false) => {
+      try {
+        return await readRecords({
+          limit: pageLimit,
+          offset: pageOffset,
+          recordIds,
+          forceLookupMetadataRefresh
+        }, settings);
+      } catch (error) {
         return {
-          ...page,
-          records,
-          pages
+          ok: false,
+          status: "records_request_failed",
+          message: error && error.message ? error.message : String(error || "")
         };
       }
-
+    };
+    const appendPage = (page, pageOffset, pageLimit) => {
       fieldsUsed = page.fieldsUsed || fieldsUsed;
       userNameResolvedCount += Number(page.userNameResolvedCount || 0);
       pages.push({
-        offset,
-        limit: page.limit,
+        offset: pageOffset,
+        limit: page.limit || pageLimit,
         recordCount: page.recordCount,
+        total: page.total,
+        hasMore: page.hasMore,
         perf: page.perf || null
       });
-      const positionedRecords = page.records.map((record, index) => ({
+      records.push(...page.records.map((record, index) => ({
         ...record,
-        scanIndex: offset + index + 1,
-        viewRowNumber: offset + index + 2
-      }));
-      records.push(...positionedRecords);
+        scanIndex: pageOffset + index + 1,
+        viewRowNumber: pageOffset + index + 2
+      })));
+    };
+    const failedResult = (page) => ({
+      ...page,
+      records: records.sort((left, right) => Number(left.scanIndex || 0) - Number(right.scanIndex || 0)),
+      pages: pages.sort((left, right) => left.offset - right.offset)
+    });
 
-      if (recordIds.length > 0 || page.recordCount < pageLimit || page.recordCount === 0) {
-        break;
-      }
-      offset += pageLimit;
+    const firstPageLimit = Math.min(SCAN_PAGE_SIZE, targetLimit);
+    const firstPage = await readPage(0, firstPageLimit, Boolean(readOptions.forceLookupMetadataRefresh));
+    if (!firstPage.ok) {
+      return failedResult(firstPage);
     }
+    appendPage(firstPage, 0, firstPageLimit);
+    sourceTotal = firstPage.total !== null && firstPage.total !== undefined && firstPage.total !== ""
+      && Number.isFinite(Number(firstPage.total)) && Number(firstPage.total) >= 0
+      ? Number(firstPage.total)
+      : null;
+
+    if (recordIds.length === 0 && records.length < targetLimit) {
+      const knownRecordCount = sourceTotal === null ? null : Math.min(sourceTotal, targetLimit);
+      if (knownRecordCount !== null && knownRecordCount > records.length) {
+        const pageRequests = [];
+        for (offset = firstPageLimit; offset < knownRecordCount; offset += SCAN_PAGE_SIZE) {
+          pageRequests.push({
+            offset,
+            limit: Math.min(SCAN_PAGE_SIZE, knownRecordCount - offset)
+          });
+        }
+
+        for (let index = 0; index < pageRequests.length; index += SCAN_PAGE_CONCURRENCY) {
+          const batch = pageRequests.slice(index, index + SCAN_PAGE_CONCURRENCY);
+          const batchStartedAt = Date.now();
+          const batchPages = await Promise.all(batch.map((request) => readPage(request.offset, request.limit)));
+          for (let pageIndex = 0; pageIndex < batchPages.length; pageIndex += 1) {
+            let page = batchPages[pageIndex];
+            const request = batch[pageIndex];
+            if (!page.ok) {
+              concurrencyFallbackCount += 1;
+              if (logger && typeof logger.warn === "function") {
+                logger.warn("Dev progress concurrent page read failed, retry sequentially", {
+                  offset: request.offset,
+                  limit: request.limit,
+                  errcode: page.errcode,
+                  errmsg: page.errmsg || "",
+                  message: page.message || "",
+                  concurrency: SCAN_PAGE_CONCURRENCY
+                });
+              }
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              page = await readPage(request.offset, request.limit);
+            }
+            if (!page.ok) {
+              return failedResult(page);
+            }
+            appendPage(page, request.offset, request.limit);
+          }
+          if (logger && typeof logger.info === "function") {
+            logger.info("Dev progress page batch loaded", {
+              pageCount: batch.length,
+              firstOffset: batch[0].offset,
+              lastOffset: batch[batch.length - 1].offset,
+              concurrency: batch.length,
+              durationMs: Date.now() - batchStartedAt
+            });
+          }
+        }
+      } else if (knownRecordCount === null && firstPage.recordCount >= firstPageLimit && firstPage.hasMore !== false) {
+        offset = firstPageLimit;
+        while (records.length < targetLimit) {
+          const pageLimit = Math.min(SCAN_PAGE_SIZE, targetLimit - records.length);
+          const page = await readPage(offset, pageLimit);
+          if (!page.ok) {
+            return failedResult(page);
+          }
+          appendPage(page, offset, pageLimit);
+          if (page.recordCount < pageLimit || page.recordCount === 0 || page.hasMore === false) {
+            break;
+          }
+          offset += pageLimit;
+        }
+      }
+    }
+
+    records.sort((left, right) => Number(left.scanIndex || 0) - Number(right.scanIndex || 0));
+    pages.sort((left, right) => left.offset - right.offset);
 
     return {
       ok: true,
       status: "ok",
       limit: targetLimit,
       recordCount: records.length,
+      sourceTotal,
+      pageConcurrency: sourceTotal !== null ? Math.min(SCAN_PAGE_CONCURRENCY, pages.length) : 1,
+      concurrencyFallbackCount,
       fieldsUsed,
       userNameResolvedCount,
       pages,
@@ -2100,7 +2282,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function previewRecords(readOptions = {}) {
-    const result = await previewDevProgressRecords(getDevProgressSettings(), readOptions);
+    const result = await previewDevProgressRecords(settingsProvider(), readOptions);
     if (logger && result.ok) {
       logger.info("Dev progress records preview loaded", {
         recordCount: result.recordCount,
@@ -2111,7 +2293,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function countByPerson(personName, readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const result = await readRecords({
       limit: 500,
       ...readOptions
@@ -2145,7 +2327,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function summarizePeople(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const result = await readRecords({
       limit: 500,
       ...readOptions
@@ -2182,8 +2364,11 @@ function createDevProgressModule(options = {}) {
     return {
       limit: result.limit,
       recordCount: result.recordCount,
+      sourceTotal: result.sourceTotal,
       userNameResolvedCount: result.userNameResolvedCount || 0,
       pageCount: result.pages ? result.pages.length : 1,
+      pageConcurrency: Number(result.pageConcurrency || 1),
+      concurrencyFallbackCount: Number(result.concurrencyFallbackCount || 0),
       pages: result.pages || [],
       fieldsUsed: result.fieldsUsed,
       perf: result.perf || null
@@ -2192,7 +2377,7 @@ function createDevProgressModule(options = {}) {
 
   async function runAnomalyScan(scanOptions = {}) {
     const totalStartedAt = Date.now();
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const rules = settings.rules || {};
     const readStartedAt = Date.now();
     const result = await readRecordsForScan(settings, scanOptions.limit || rules.scanLimit || 2000, scanOptions);
@@ -2226,7 +2411,7 @@ function createDevProgressModule(options = {}) {
       fieldTitles: []
     };
     try {
-      fieldSchema = await readDevProgressFieldDefinitions(settings);
+      fieldSchema = await fieldDefinitionsReader(settings);
     } catch (error) {
       fieldSchema = {
         ok: false,
@@ -2311,7 +2496,7 @@ function createDevProgressModule(options = {}) {
     ));
     if (usesWorkdayCalendar) {
       try {
-        workdayCalendar = await readDevProgressWorkdayCalendar(settings);
+        workdayCalendar = await workdayCalendarReader(settings);
       } catch (error) {
         workdayCalendar = {
           ok: false,
@@ -2391,7 +2576,7 @@ function createDevProgressModule(options = {}) {
   }
 
   function buildH5MonitorCacheFromScan(settings, rules, readResult, scanResult, signalInfo, refreshReason) {
-    const workflowRules = getDemandWorkflowRulesSettings().normalizedRules;
+    const workflowRules = workflowRulesProvider().normalizedRules;
     const fallbackFilters = fallbackLeaderFilters(workflowRules);
     const grouped = collectRequiredFieldPushGroups(scanResult, {
       roleLeaderNameMap: roleLeaderNameMapFromWorkflowRules(workflowRules)
@@ -2530,17 +2715,239 @@ function createDevProgressModule(options = {}) {
     }
   }
 
+  function recentTaskUserKey(userName) {
+    return String(userName || "").trim().toLocaleLowerCase("zh-Hans-CN");
+  }
+
+  function recentTaskEntries(userName, nowMs = nowMsProvider()) {
+    const key = recentTaskUserKey(userName);
+    if (!key) {
+      return [];
+    }
+    const entries = (recentTaskInteractions.get(key) || [])
+      .filter((entry) => nowMs - Number(entry.clickedAtMs || 0) <= RECENT_TASK_TTL_MS)
+      .sort((left, right) => Number(right.clickedAtMs || 0) - Number(left.clickedAtMs || 0))
+      .slice(0, RECENT_TASK_LIMIT_PER_USER);
+    if (entries.length > 0) {
+      recentTaskInteractions.set(key, entries);
+    } else {
+      recentTaskInteractions.delete(key);
+    }
+    return entries;
+  }
+
+  function recordRecentTaskInteraction(interaction = {}) {
+    const userName = String(interaction.userName || "").trim().slice(0, 80);
+    const recordId = String(interaction.recordId || "").trim().slice(0, 160);
+    const demandId = String(interaction.demandId || "").trim().slice(0, 160);
+    const project = String(interaction.project || "").trim().slice(0, 80);
+    const action = String(interaction.action || "open").trim().slice(0, 40) || "open";
+    if (!userName || !recordId) {
+      return {
+        ok: false,
+        module: "devProgress",
+        action: "recent_task_interaction",
+        message: !userName ? "缺少登录用户" : "缺少任务 recordId"
+      };
+    }
+
+    const key = recentTaskUserKey(userName);
+    const nowMs = nowMsProvider();
+    const entry = {
+      recordId,
+      demandId,
+      project,
+      action,
+      clickedAt: new Date(nowMs).toISOString(),
+      clickedAtMs: nowMs
+    };
+    const entries = recentTaskEntries(userName, nowMs).filter((item) => item.recordId !== recordId);
+    recentTaskInteractions.set(key, [entry, ...entries].slice(0, RECENT_TASK_LIMIT_PER_USER));
+    if (logger && typeof logger.info === "function") {
+      logger.info("Dev progress recent task interaction recorded", {
+        userName,
+        taskId: demandId,
+        recordId,
+        project,
+        action,
+        retainedCount: recentTaskInteractions.get(key).length,
+        ttlMinutes: Math.round(RECENT_TASK_TTL_MS / 60000)
+      });
+    }
+    return {
+      ok: true,
+      module: "devProgress",
+      action: "recent_task_interaction",
+      task: {
+        recordId,
+        demandId,
+        project,
+        clickedAt: entry.clickedAt
+      },
+      retainedCount: recentTaskInteractions.get(key).length
+    };
+  }
+
+  function mergePartialH5MonitorCache(existing, scan, recordIds, userName) {
+    const recordIdSet = new Set(recordIds);
+    const partial = buildH5MonitorCacheFromScan(
+      scan.settings,
+      scan.rules,
+      scan.readResult,
+      scan.scanResult,
+      null,
+      "recent_task_partial"
+    );
+    const requiredItems = [
+      ...(Array.isArray(existing.requiredItems)
+        ? existing.requiredItems.filter((item) => !recordIdSet.has(String(item.recordId || "").trim()))
+        : []),
+      ...partial.requiredItems
+    ];
+    const personTaskItems = [
+      ...(Array.isArray(existing.personTaskItems)
+        ? existing.personTaskItems.filter((item) => !recordIdSet.has(String(item.recordId || "").trim()))
+        : []),
+      ...partial.personTaskItems
+    ];
+    const now = new Date().toISOString();
+    return {
+      ...existing,
+      requiredItems: sortH5TaskItems(requiredItems),
+      personTaskItems: sortH5TaskItems(personTaskItems),
+      partialRefreshedAt: now,
+      partialRefresh: {
+        userName,
+        requestedRecordCount: recordIds.length,
+        refreshedRecordCount: scan.readResult.records.length,
+        removedRecordCount: Math.max(0, recordIds.length - scan.readResult.records.length),
+        durationMs: Number(scan.scanResult && scan.scanResult.perf && scan.scanResult.perf.totalMs || 0)
+      },
+      stats: {
+        ...(existing.stats || {}),
+        requiredItemCount: requiredItems.length,
+        personTaskItemCount: personTaskItems.length
+      }
+    };
+  }
+
+  async function refreshH5MonitorCacheForUser(userName, refreshOptions = {}) {
+    const startedAt = Date.now();
+    const settings = settingsProvider();
+    let cache = readH5MonitorCache();
+    if (!cache || cache.ok === false || cache.version !== H5_MONITOR_CACHE_VERSION) {
+      return refreshH5MonitorCache({
+        forceScan: true,
+        limit: refreshOptions.limit,
+        scanSource: "manual_refresh_cache_bootstrap"
+      });
+    }
+
+    const interactions = recentTaskEntries(userName);
+    const recordIds = interactions.map((entry) => entry.recordId);
+    let partialError = "";
+    if (recordIds.length > 0) {
+      const partialScan = await executeAnomalyScan({
+        limit: recordIds.length,
+        recordIds,
+        scanSource: "manual_recent_tasks"
+      });
+      if (partialScan.scanResult && partialScan.scanResult.ok) {
+        const latestCache = readH5MonitorCache();
+        const mergeBase = latestCache && latestCache.ok !== false && latestCache.version === H5_MONITOR_CACHE_VERSION
+          ? latestCache
+          : cache;
+        cache = mergePartialH5MonitorCache(mergeBase, partialScan, recordIds, userName);
+        saveH5MonitorCache(cache);
+      } else {
+        partialError = partialScan.scanResult && (partialScan.scanResult.text || partialScan.scanResult.message)
+          ? (partialScan.scanResult.text || partialScan.scanResult.message)
+          : "最近任务精确刷新失败";
+      }
+    }
+
+    const signalInfo = await getDocumentChangeSignal();
+    const checkedAt = new Date().toISOString();
+    let backgroundSyncStarted = false;
+    let signalUnchanged = false;
+    if (signalInfo && signalInfo.ok && signalInfo.signal) {
+      const latestCache = readH5MonitorCache();
+      if (latestCache && latestCache.ok !== false && latestCache.version === H5_MONITOR_CACHE_VERSION) {
+        cache = latestCache;
+      }
+      signalUnchanged = Boolean(cache.signal) && cache.signal === signalInfo.signal;
+      cache = {
+        ...cache,
+        signalCheckedAt: checkedAt,
+        lastSignalError: ""
+      };
+      saveH5MonitorCache(cache);
+      if (!signalUnchanged) {
+        backgroundSyncStarted = true;
+        scheduleH5MonitorCacheRefresh({
+          forceScan: true,
+          signalInfo,
+          limit: refreshOptions.limit,
+          scanSource: "manual_refresh_background_full"
+        });
+      }
+    } else {
+      const latestCache = readH5MonitorCache();
+      if (latestCache && latestCache.ok !== false && latestCache.version === H5_MONITOR_CACHE_VERSION) {
+        cache = latestCache;
+      }
+      cache = {
+        ...cache,
+        signalCheckedAt: checkedAt,
+        lastSignalError: signalInfo && (signalInfo.message || signalInfo.errmsg)
+          ? (signalInfo.message || signalInfo.errmsg)
+          : "文档变更信号读取失败"
+      };
+      saveH5MonitorCache(cache);
+    }
+
+    const resultMeta = {
+      manualRefresh: true,
+      signalUnchanged,
+      backgroundSyncStarted,
+      recentInteractionCount: interactions.length,
+      partialRefreshedCount: cache.partialRefresh && cache.partialRefresh.userName === userName
+        ? Number(cache.partialRefresh.requestedRecordCount || 0)
+        : 0,
+      partialError,
+      signalError: cache.lastSignalError || "",
+      durationMs: Date.now() - startedAt
+    };
+    if (logger && typeof logger.info === "function") {
+      logger.info("Dev progress manual fast refresh completed", {
+        userName,
+        selectedTaskIds: interactions.map((entry) => entry.demandId).filter(Boolean),
+        selectedRecordIds: recordIds,
+        signalUnchanged,
+        backgroundSyncStarted,
+        partialError,
+        durationMs: resultMeta.durationMs
+      });
+    }
+    return {
+      ...cache,
+      cacheMeta: h5CacheMeta(cache, resultMeta)
+    };
+  }
+
   async function refreshH5MonitorCache(refreshOptions = {}) {
     if (h5MonitorRefreshPromise) {
       return h5MonitorRefreshPromise;
     }
 
     h5MonitorRefreshPromise = (async () => {
-      const settings = getDevProgressSettings();
+      const settings = settingsProvider();
       const existing = readH5MonitorCache();
-      const force = Boolean(refreshOptions.force);
+      const forceScan = Boolean(refreshOptions.forceScan);
       const limit = refreshOptions.limit || (settings.rules && settings.rules.scanLimit) || 4000;
-      const signalInfo = await getDocumentChangeSignal();
+      const signalInfo = refreshOptions.signalInfo && typeof refreshOptions.signalInfo === "object"
+        ? refreshOptions.signalInfo
+        : await getDocumentChangeSignal();
       const checkedAt = new Date().toISOString();
       if (!signalInfo.ok) {
         if (existing && existing.ok !== false) {
@@ -2570,7 +2977,7 @@ function createDevProgressModule(options = {}) {
         };
       }
 
-      if (!force && existing && existing.ok !== false && existing.signal && existing.signal === signalInfo.signal) {
+      if (!forceScan && existing && existing.ok !== false && existing.signal && existing.signal === signalInfo.signal) {
         const unchangedCache = {
           ...existing,
           signalCheckedAt: checkedAt,
@@ -2589,7 +2996,12 @@ function createDevProgressModule(options = {}) {
         };
       }
 
-      const scan = await executeAnomalyScan({ limit });
+      const scan = await executeSharedAnomalyScan({
+        limit,
+        forceScan,
+        h5MonitorSignal: signalInfo,
+        scanSource: refreshOptions.scanSource || "h5_cache_refresh"
+      });
       if (!scan.scanResult.ok) {
         if (existing && existing.ok !== false) {
           const staleCache = {
@@ -2624,7 +3036,7 @@ function createDevProgressModule(options = {}) {
         scan.readResult,
         scan.scanResult,
         signalInfo,
-        existing && existing.signal ? "signal_changed" : "cache_empty"
+        refreshOptions.scanSource || (existing && existing.signal ? "signal_changed" : "cache_empty")
       );
       saveH5MonitorCache(nextCache);
       if (logger && typeof logger.info === "function") {
@@ -2658,16 +3070,21 @@ function createDevProgressModule(options = {}) {
   }
 
   async function getH5MonitorCacheSnapshot(options = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     let cache = readH5MonitorCache();
     const force = Boolean(options.forceRefresh);
+    const userName = String(options.userName || "").trim();
+    if (force && userName) {
+      return refreshH5MonitorCacheForUser(userName, options);
+    }
     const versionMismatch = Boolean(cache && cache.version !== H5_MONITOR_CACHE_VERSION);
     const needsRefresh = force || h5CacheNeedsSignalCheck(cache, settings);
     if (needsRefresh) {
       if (!cache || cache.ok === false || force || options.waitForRefresh || versionMismatch) {
         cache = await refreshH5MonitorCache({
-          force: force || versionMismatch || !cache || cache.ok === false,
-          limit: options.limit
+          forceScan: versionMismatch || !cache || cache.ok === false,
+          limit: options.limit,
+          scanSource: force ? "forced_signal_check" : "h5_cache_refresh"
         });
       } else {
         scheduleH5MonitorCacheRefresh({
@@ -2689,7 +3106,7 @@ function createDevProgressModule(options = {}) {
     return {
       ...cache,
       cacheMeta: h5CacheMeta(cache, {
-        refreshInProgress: Boolean(h5MonitorRefreshPromise),
+        refreshInProgress: Boolean(h5MonitorRefreshPromise || fullAnomalyScanPromise),
         needsRefresh
       })
     };
@@ -2715,7 +3132,10 @@ function createDevProgressModule(options = {}) {
   }
 
   async function prepareRequiredFieldPush(scanOptions = {}) {
-    const { settings, rules, readResult, scanResult } = await executeAnomalyScan(scanOptions);
+    const { settings, rules, readResult, scanResult } = await executeSharedAnomalyScan({
+      ...scanOptions,
+      scanSource: scanOptions.scanSource || "required_field_push"
+    });
     if (!scanResult.ok) {
       return scanResult;
     }
@@ -2727,7 +3147,7 @@ function createDevProgressModule(options = {}) {
       scanResult
     }, scanOptions);
 
-    const workflowRules = getDemandWorkflowRulesSettings().normalizedRules;
+    const workflowRules = workflowRulesProvider().normalizedRules;
     const traceRequest = scanOptions.requiredFieldTrace && typeof scanOptions.requiredFieldTrace === "object"
       ? scanOptions.requiredFieldTrace
       : null;
@@ -2924,7 +3344,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function listRequiredFieldItems(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const userName = String(readOptions.userName || "").trim();
     if (!userName) {
       return {
@@ -2936,6 +3356,7 @@ function createDevProgressModule(options = {}) {
     }
 
     const cache = await getH5MonitorCacheSnapshot({
+      userName,
       limit: readOptions.limit,
       forceRefresh: readOptions.forceRefresh,
       waitForRefresh: readOptions.waitForRefresh
@@ -3040,7 +3461,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function listPersonTaskItems(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const userName = String(readOptions.userName || "").trim();
     if (!userName) {
       return {
@@ -3052,6 +3473,7 @@ function createDevProgressModule(options = {}) {
     }
 
     const cache = await getH5MonitorCacheSnapshot({
+      userName,
       limit: readOptions.limit,
       forceRefresh: readOptions.forceRefresh,
       waitForRefresh: readOptions.waitForRefresh
@@ -3114,7 +3536,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function listMemberTaskItems(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const userName = String(readOptions.userName || "").trim();
     if (!userName) {
       return {
@@ -3127,6 +3549,7 @@ function createDevProgressModule(options = {}) {
 
     const leaderRoles = leaderMemberScopesForPerson(userName, settings.personAliases || {});
     const cache = await getH5MonitorCacheSnapshot({
+      userName,
       limit: readOptions.limit,
       forceRefresh: readOptions.forceRefresh,
       waitForRefresh: readOptions.waitForRefresh
@@ -3250,7 +3673,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function summarizeDemandDetails(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const rules = settings.rules || {};
     const sender = readOptions.sender || {};
     const params = {
@@ -3395,7 +3818,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function summarizeVersions(readOptions = {}) {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const rules = settings.rules || {};
     const sender = readOptions.sender || {};
     const timeRange = normalizeTimeRangeInput(readOptions.timeRange) || parseVersionTimeRange(readOptions.text || "");
@@ -3593,7 +4016,7 @@ function createDevProgressModule(options = {}) {
       return summarizePeople();
     }
 
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     const personName = await extractPersonName(context, task, settings, logger);
     if (personName && (action.includes("person_task_count") || TASK_QUERY_PATTERN.test(context.text))) {
       return countByPerson(personName);
@@ -3609,8 +4032,9 @@ function createDevProgressModule(options = {}) {
   }
 
   async function getStatus() {
-    const settings = getDevProgressSettings();
+    const settings = settingsProvider();
     return {
+      version: DEV_PROGRESS_MODULE_VERSION,
       enabled: Boolean(settings.enabled),
       source: settings.source,
       ready: Boolean(settings.ready),
@@ -3629,6 +4053,7 @@ function createDevProgressModule(options = {}) {
     summarizeDemandDetails,
     scanAnomalies,
     prepareRequiredFieldPush,
+    recordRecentTaskInteraction,
     listRequiredFieldItems,
     listPersonTaskItems,
     listMemberTaskItems,
