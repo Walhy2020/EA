@@ -48,10 +48,10 @@ assert.strictEqual(settingsApi.itemMatchesSelection(records[2], "恶魔高校", 
 assert.deepStrictEqual(settingsApi.filterItems(records, "恶魔高校", configured, catalog), records);
 
 const root = path.resolve(__dirname, "..");
-const html = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.html"), "utf8");
-const js = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.js"), "utf8");
-const css = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.css"), "utf8");
-const server = fs.readFileSync(path.join(root, "src", "admin", "adminServer.js"), "utf8");
+const html = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.html"), "utf8").replace(/\r\n/g, "\n");
+const js = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.js"), "utf8").replace(/\r\n/g, "\n");
+const css = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.css"), "utf8").replace(/\r\n/g, "\n");
+const server = fs.readFileSync(path.join(root, "src", "admin", "adminServer.js"), "utf8").replace(/\r\n/g, "\n");
 
 assert(/id="projectSelect"[\s\S]*?id="monitorRefreshButton"[\s\S]*?id="projectSettingsButton"/.test(html), "刷新和设置按钮必须位于项目选择右侧");
 assert(html.includes('id="projectSettingsDialog"'), "页面必须包含项目设置窗口");

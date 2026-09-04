@@ -290,8 +290,8 @@ async function checkDeletedTaskRemoval() {
 
 function checkFrontendAndRoute() {
   const root = path.resolve(__dirname, "..");
-  const js = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.js"), "utf8");
-  const server = fs.readFileSync(path.join(root, "src", "admin", "adminServer.js"), "utf8");
+  const js = fs.readFileSync(path.join(root, "src", "admin", "static", "demand-h5.js"), "utf8").replace(/\r\n/g, "\n");
+  const server = fs.readFileSync(path.join(root, "src", "admin", "adminServer.js"), "utf8").replace(/\r\n/g, "\n");
   assert(js.includes("/api/dev-progress/recent-task-interaction"));
   assert(js.includes('recordRecentTaskInteraction(item, "copy_task_id")'));
   assert(js.includes('recordRecentTaskInteraction(item, "open_task")'));
