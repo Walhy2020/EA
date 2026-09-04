@@ -75,7 +75,7 @@ function scanBundle(records, scanOptions = {}) {
 function initialCache() {
   return {
     ok: true,
-    version: 20,
+    version: 21,
     signal: "signal-1",
     modifyTime: "1",
     signalCheckedAt: "2026-09-04T01:00:00.000Z",

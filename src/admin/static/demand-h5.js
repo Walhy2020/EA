@@ -78,13 +78,14 @@ const leaderSupplementTitle = document.getElementById("leaderSupplementTitle");
 const leaderSupplementFields = document.getElementById("leaderSupplementFields");
 const DEFAULT_PROJECT_NAME = "恶魔高校";
 const FALLBACK_VIEWER_NAMES = new Set(["王谦", "李晶晶"]);
-const H5_PAGE_VERSION = "0.3.3";
+const H5_PAGE_VERSION = "0.3.4";
 const ENTRY_CONTEXT = window.EADemandEntryContext || {};
 const FALLBACK_LEADER_FILTER_API = window.EADemandFallbackLeaderFilter || null;
 const DEMAND_LOCATOR_NAVIGATION = window.EADemandLocatorNavigation || null;
 const DEMAND_TASK_TIME_SORT = window.EADemandTaskTimeSort || null;
 const TASK_ID_COPY_API = window.EADemandTaskIdCopy || null;
 const PROJECT_SETTINGS_API = window.EADemandProjectSettings || null;
+const REQUIRED_FIELD_DISPLAY_API = window.DemandRequiredFieldDisplay || null;
 const PROJECT_CATALOG = [
   { value: "恶魔高校", label: "恶魔高校", aliases: ["高校"] },
   { value: "一骑当千", label: "一骑当千", aliases: ["一骑", "掌上谈兵", "STB"] },
@@ -932,6 +933,9 @@ function normalizeRequiredFieldItem(item) {
     missingFields: Array.isArray(safeItem.missingFields)
       ? safeItem.missingFields.map(displayFieldName).filter(Boolean)
       : [],
+    fieldProblems: REQUIRED_FIELD_DISPLAY_API
+      ? REQUIRED_FIELD_DISPLAY_API.normalizeProblems(safeItem.fieldProblems, displayFieldName)
+      : [],
     createdAt: safeItem.createdAt || "",
     createdTime: safeItem.createdTime || "",
     updatedAt: safeItem.updatedAt || "",
@@ -1496,7 +1500,9 @@ function renderRequiredItemList(listNode, items, datasetName) {
 
     const missing = document.createElement("span");
     missing.className = "missing-fields-line";
-    missing.textContent = `缺失：${requiredItem.missingFields.join("、") || "-"}`;
+    missing.textContent = REQUIRED_FIELD_DISPLAY_API
+      ? REQUIRED_FIELD_DISPLAY_API.issueLine(requiredItem, displayFieldName)
+      : `缺失：${requiredItem.missingFields.join("、") || "-"}`;
 
     text.append(title, meta, missing);
     item.append(text);

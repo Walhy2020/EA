@@ -58,8 +58,9 @@ assert(html.includes('id="projectSettingsDialog"'), "页面必须包含项目设
 assert(html.includes('id="showAllProjectsInput"'), "项目设置必须支持启用全部项目");
 assert(html.includes('id="allProjectsOptions"'), "项目设置必须支持配置全部项目包含范围");
 assert(html.includes('id="projectOrderList"'), "项目设置必须支持调整项目顺序");
-assert(/demand-project-settings\.js\?v=0\.3\.3[\s\S]*demand-h5\.js\?v=0\.3\.3/.test(html), "项目设置模块必须先于主页面脚本加载");
-assert(js.includes('const H5_PAGE_VERSION = "0.3.3"'), "页面请求必须携带最新版本号");
+assert(/demand-project-settings\.js\?v=0\.3\.4[\s\S]*demand-required-field-display\.js\?v=0\.3\.4[\s\S]*demand-h5\.js\?v=0\.3\.4/.test(html), "项目设置和字段说明模块必须先于主页面脚本加载");
+assert(js.includes('const H5_PAGE_VERSION = "0.3.4"'), "页面请求必须携带最新版本号");
+assert(html.includes('demand-required-field-display.js?v=0.3.4'), "字段异常说明模块必须使用当前版本加载");
 assert(js.includes('params.set("forceRefresh", "1")'), "手动刷新必须请求服务端检查总表变更");
 assert(js.includes('params.set("waitForRefresh", "1")'), "手动刷新必须等待最近任务精确刷新完成");
 assert(js.includes('dataStatus.textContent = "数据更新时间：正在读取最新需求总表..."'), "刷新期间必须显示明确状态");

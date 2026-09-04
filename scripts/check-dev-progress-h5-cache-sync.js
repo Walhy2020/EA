@@ -70,7 +70,7 @@ async function main() {
     }),
     readH5MonitorCacheFile: () => ({
       ok: true,
-      version: 20,
+      version: 21,
       signal: "test-doc|test-sheet|test-view|1788486071",
       modifyTime: "1788486071",
       refreshedAt: "2026-09-04T01:45:20.000Z",

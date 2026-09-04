@@ -31,8 +31,8 @@ const SCAN_PAGE_CONCURRENCY = 2;
 const FULL_SCAN_REUSE_MS = 30 * 1000;
 const RECENT_TASK_TTL_MS = 30 * 60 * 1000;
 const RECENT_TASK_LIMIT_PER_USER = 20;
-const DEV_PROGRESS_MODULE_VERSION = "0.3.3";
-const H5_MONITOR_CACHE_VERSION = 20;
+const DEV_PROGRESS_MODULE_VERSION = "0.3.4";
+const H5_MONITOR_CACHE_VERSION = 21;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
 const DEFAULT_VERSION_PROJECT_ALIASES = {
@@ -601,6 +601,41 @@ function leaderRequiredBlockedTaskKeys(requiredItems = []) {
   return keys;
 }
 
+function uniqueFieldProblems(problems = []) {
+  const result = [];
+  const seen = new Set();
+  for (const problem of Array.isArray(problems) ? problems : []) {
+    if (!problem || typeof problem !== "object") {
+      continue;
+    }
+    const normalized = {
+      fieldName: String(problem.fieldName || "").trim(),
+      code: String(problem.code || "").trim(),
+      message: String(problem.message || "").trim()
+    };
+    for (const key of ["actualValue", "maximum", "resultDate", "deadlineField", "deadlineDate", "disallowedValues"]) {
+      if (Object.prototype.hasOwnProperty.call(problem, key)) {
+        normalized[key] = problem[key];
+      }
+    }
+    if (!normalized.fieldName && !normalized.message) {
+      continue;
+    }
+    const key = JSON.stringify(normalized);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function fieldProblemsForFields(problems = [], fieldNames = []) {
+  const allowed = new Set(uniqueMerge(fieldNames));
+  return uniqueFieldProblems(problems).filter((problem) => allowed.has(problem.fieldName));
+}
+
 function mergeRequiredFieldItem(items, nextItem) {
   const nextKey = requiredFieldMergeKey(nextItem);
   const existing = nextKey
@@ -609,7 +644,8 @@ function mergeRequiredFieldItem(items, nextItem) {
   if (!existing) {
     items.push({
       ...nextItem,
-      missingFields: uniqueMerge(nextItem.missingFields)
+      missingFields: uniqueMerge(nextItem.missingFields),
+      fieldProblems: uniqueFieldProblems(nextItem.fieldProblems)
     });
     return;
   }
@@ -617,6 +653,10 @@ function mergeRequiredFieldItem(items, nextItem) {
   existing.missingFields = uniqueMerge([
     ...(existing.missingFields || []),
     ...(nextItem.missingFields || [])
+  ]);
+  existing.fieldProblems = uniqueFieldProblems([
+    ...(existing.fieldProblems || []),
+    ...(nextItem.fieldProblems || [])
   ]);
   existing.originalOwnerName = uniqueMerge([
     existing.originalOwnerName,
@@ -801,7 +841,8 @@ function requiredFieldItemForLeaderScope(item = {}, allowedFieldSet) {
   return {
     ...item,
     id: `${item.recordId || item.demandId || item.demand || "task"}-${scopedMissingFields.join("|")}`,
-    missingFields: scopedMissingFields
+    missingFields: scopedMissingFields,
+    fieldProblems: fieldProblemsForFields(item.fieldProblems, scopedMissingFields)
   };
 }
 
@@ -852,6 +893,7 @@ function requiredFieldItemForFallbackScope(item = {}, allowedFieldSet) {
     ...item,
     id: `${item.recordId || item.demandId || item.demand || "task"}-fallback-${fallbackMissingFields.join("|")}`,
     missingFields: fallbackMissingFields,
+    fieldProblems: fieldProblemsForFields(item.fieldProblems, fallbackMissingFields),
     ownerType: "fallback"
   };
 }
@@ -916,7 +958,8 @@ function collectRequiredFieldPushGroups(scanResult, options = {}) {
           demandType: issue.demandType || task.demandType || "",
           status: issue.status || task.status || "",
           originalOwnerName: "未配置责任人",
-          missingFields: Array.isArray(issue.missingFields) ? issue.missingFields : []
+          missingFields: Array.isArray(issue.missingFields) ? issue.missingFields : [],
+          fieldProblems: Array.isArray(issue.fieldProblems) ? issue.fieldProblems : []
         });
         continue;
       }
@@ -934,6 +977,7 @@ function collectRequiredFieldPushGroups(scanResult, options = {}) {
           status: issue.status || task.status || "",
           originalOwnerName: uniqueMerge(originalOwnerNames).join("、"),
           missingFields: Array.isArray(issue.missingFields) ? issue.missingFields : [],
+          fieldProblems: Array.isArray(issue.fieldProblems) ? issue.fieldProblems : [],
           isFallbackOwner: Boolean(issue.isFallbackOwner)
         });
       }
@@ -1089,6 +1133,7 @@ function requiredFieldH5Item(ownerName, item, settings = {}, workflowRules = {})
     demandType: item.demandType || task.demandType || "",
     status: item.status || task.status || "",
     missingFields,
+    fieldProblems: fieldProblemsForFields(item.fieldProblems, missingFields),
     createdAt: displayDateValue(dates.createdAt),
     createdTime: String(dates.createdAt || "").trim(),
     updatedAt: displayDateValue(dates.updatedAt),
@@ -4070,6 +4115,7 @@ function createDevProgressModule(options = {}) {
 module.exports = {
   createDevProgressModule,
   __test: {
+    requiredFieldH5Item,
     requiredFieldItemForLeaderScope,
     requiredFieldLeaderViewItems,
     fallbackLeaderViewItems,
