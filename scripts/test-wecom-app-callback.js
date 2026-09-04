@@ -632,6 +632,10 @@ async function main() {
       ["被盯梢人", "盯梢时间", "任务ID", "详情"]
     );
     assert.equal(
+      requesterNewMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情").value,
+      "历史"
+    );
+    assert.equal(
       linkedTaskAfterSend.appPushMessages[1].linkedCardTaskId,
       linkedCard.task_id
     );
@@ -660,6 +664,10 @@ async function main() {
     assert.equal(requesterReadMessage.templateCard.source.desc, "EA盯梢");
     assert.equal(requesterReadMessage.templateCard.source.desc_color, 1);
     assert.equal(requesterReadMessage.templateCard.source.desc.includes("NEW"), false);
+    assert.equal(
+      requesterReadMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情").value,
+      "历史"
+    );
     const linkedTaskAfterSync = taskById(linkedReminderStoreFile, "wd_linked_reminder");
     const requesterNewRecord = linkedTaskAfterSync.appPushMessages.find((item) => item.msgid === "linked-2");
     const requesterReadRecord = linkedTaskAfterSync.appPushMessages.find((item) => item.msgid === "linked-3");
@@ -706,7 +714,7 @@ async function main() {
     assert.equal(requesterFeedbackMessage.templateCard.horizontal_content_list.length, 6);
     assert.equal(
       requesterFeedbackMessage.templateCard.horizontal_content_list.find((item) => item.keyname === "详情").value,
-      "查看盯梢详情"
+      "历史"
     );
 
     const expiredFeedbackStoreFile = path.join(directory, "expired-requester-feedback-card-tasks.json");

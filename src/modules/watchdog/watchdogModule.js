@@ -2802,7 +2802,7 @@ function createWatchdogModule(options = {}) {
     if (feedbackUrl) {
       contents.push({
         keyname: "详情",
-        value: "查看盯梢详情",
+        value: "历史",
         type: 1,
         url: feedbackUrl
       });
