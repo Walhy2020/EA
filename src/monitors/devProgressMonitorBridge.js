@@ -1691,6 +1691,14 @@ function createDevProgressMonitorBridge(options) {
       const result = await devProgressModule.prepareRequiredFieldPush({
         limit: pushConfig.scanLimit || undefined,
         focusDemandIds: pushConfig.pilot.focusDemandIds,
+        syncH5MonitorCache: true,
+        h5MonitorSignal: changeDecision && changeDecision.signal
+          ? {
+            ok: true,
+            signal: changeDecision.signal,
+            modifyTime: changeDecision.modifyTime || ""
+          }
+          : undefined,
         targetOverride: effectiveTargetName
           ? {
             enabled: true,

@@ -9,6 +9,7 @@ const { createDevProgressMonitorBridge } = require("../src/monitors/devProgressM
 const stateFile = path.join(os.tmpdir(), `ea-dev-progress-formal-${process.pid}-${Date.now()}.json`);
 let scanCount = 0;
 let sendCount = 0;
+let scanOptions = null;
 
 async function main() {
   try {
@@ -35,8 +36,9 @@ async function main() {
       }
     },
     devProgressModule: {
-      async prepareRequiredFieldPush() {
+      async prepareRequiredFieldPush(options) {
         scanCount += 1;
+        scanOptions = options;
         return {
           ok: true,
           scannedCount: 1,
@@ -59,6 +61,7 @@ async function main() {
   const result = await bridge.tick();
   const status = bridge.getStatus();
   assert.strictEqual(scanCount, 1);
+  assert.strictEqual(scanOptions.syncH5MonitorCache, true);
   assert.strictEqual(sendCount, 0);
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.sentTargetCount, 0);
@@ -73,6 +76,7 @@ async function main() {
     passed: true,
     checks: {
       readOnlyScanRuns: true,
+      fullScanSyncsH5Cache: true,
       personalAndGroupPushBlocked: true,
       formalStatusExposed: true
     }

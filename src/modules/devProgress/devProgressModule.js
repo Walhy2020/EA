@@ -1944,6 +1944,9 @@ function h5CacheNeedsSignalCheck(cache, settings) {
   if (cache.version !== H5_MONITOR_CACHE_VERSION) {
     return true;
   }
+  if (!cache.signal) {
+    return true;
+  }
   const checkedAt = cacheTimeMs(cache.signalCheckedAt || cache.refreshedAt);
   return !checkedAt || Date.now() - checkedAt >= h5CacheTtlMs(settings);
 }
@@ -1955,6 +1958,7 @@ function h5CacheMeta(cache, extra = {}) {
     refreshedAt: cache && cache.refreshedAt ? cache.refreshedAt : "",
     signalCheckedAt: cache && cache.signalCheckedAt ? cache.signalCheckedAt : "",
     signal: cache && cache.signal ? cache.signal : "",
+    modifyTime: cache && cache.modifyTime ? cache.modifyTime : "",
     source: "h5_monitor_cache",
     requiredItemCount: cache && Array.isArray(cache.requiredItems) ? cache.requiredItems.length : 0,
     personTaskItemCount: cache && Array.isArray(cache.personTaskItems) ? cache.personTaskItems.length : 0,
@@ -1964,6 +1968,16 @@ function h5CacheMeta(cache, extra = {}) {
 
 function createDevProgressModule(options = {}) {
   const logger = options.logger;
+  const anomalyScanOverride = typeof options.runAnomalyScan === "function" ? options.runAnomalyScan : null;
+  const documentInfoReader = typeof options.readDocumentInfo === "function"
+    ? options.readDocumentInfo
+    : readDevProgressDocumentInfo;
+  const h5CacheFileReader = typeof options.readH5MonitorCacheFile === "function"
+    ? options.readH5MonitorCacheFile
+    : readH5MonitorCacheFile;
+  const h5CacheFileWriter = typeof options.writeH5MonitorCacheFile === "function"
+    ? options.writeH5MonitorCacheFile
+    : writeH5MonitorCacheFile;
   let h5MonitorCache = null;
   let h5MonitorRefreshPromise = null;
 
@@ -1973,20 +1987,24 @@ function createDevProgressModule(options = {}) {
 
   async function getDocumentChangeSignal() {
     const settings = getDevProgressSettings();
-    return readDevProgressDocumentInfo(settings);
+    return documentInfoReader(settings);
   }
 
   function readH5MonitorCache() {
     if (!h5MonitorCache) {
-      h5MonitorCache = readH5MonitorCacheFile();
+      h5MonitorCache = h5CacheFileReader();
     }
     return h5MonitorCache;
   }
 
   function saveH5MonitorCache(cache) {
     h5MonitorCache = cache;
-    writeH5MonitorCacheFile(cache);
+    h5CacheFileWriter(cache);
     return cache;
+  }
+
+  async function executeAnomalyScan(scanOptions = {}) {
+    return anomalyScanOverride ? anomalyScanOverride(scanOptions) : runAnomalyScan(scanOptions);
   }
 
   function scanReadPerf(totalMs, pages = []) {
@@ -2422,6 +2440,96 @@ function createDevProgressModule(options = {}) {
     };
   }
 
+  async function syncH5MonitorCacheFromPreparedScan(scan, scanOptions = {}) {
+    if (!scanOptions.syncH5MonitorCache) {
+      return { enabled: false, synced: false, reason: "not_requested" };
+    }
+
+    const recordIds = Array.isArray(scanOptions.recordIds)
+      ? scanOptions.recordIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    const focusDemandIds = Array.isArray(scanOptions.focusDemandIds)
+      ? scanOptions.focusDemandIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [];
+    if (recordIds.length > 0 || focusDemandIds.length > 0) {
+      const skipped = {
+        enabled: true,
+        ok: true,
+        synced: false,
+        reason: "partial_scan",
+        recordIdCount: recordIds.length,
+        focusDemandIdCount: focusDemandIds.length
+      };
+      if (logger && typeof logger.info === "function") {
+        logger.info("Dev progress H5 cache sync skipped for partial scan", skipped);
+      }
+      return skipped;
+    }
+
+    const startedAt = Date.now();
+    try {
+      const existing = readH5MonitorCache();
+      let signalInfo = scanOptions.h5MonitorSignal && typeof scanOptions.h5MonitorSignal === "object"
+        ? scanOptions.h5MonitorSignal
+        : null;
+      let signalSource = "monitor_change_detection";
+      if (!signalInfo || !signalInfo.signal) {
+        signalInfo = await getDocumentChangeSignal();
+        signalSource = "document_info_lookup";
+      }
+      const signalAvailable = Boolean(signalInfo && signalInfo.ok && signalInfo.signal);
+      const nextCache = buildH5MonitorCacheFromScan(
+        scan.settings,
+        scan.rules,
+        scan.readResult,
+        scan.scanResult,
+        signalAvailable ? signalInfo : null,
+        "required_field_scan"
+      );
+      if (!signalAvailable) {
+        nextCache.signal = "";
+        nextCache.modifyTime = "";
+        nextCache.signalCheckedAt = "";
+        nextCache.lastSignalError = signalInfo && (signalInfo.message || signalInfo.errmsg)
+          ? (signalInfo.message || signalInfo.errmsg)
+          : "文档变更信号不可用";
+      }
+      saveH5MonitorCache(nextCache);
+      const syncResult = {
+        enabled: true,
+        ok: true,
+        synced: true,
+        reason: "required_field_scan",
+        signalSource,
+        signalAvailable,
+        signalChanged: Boolean(existing && existing.signal) && existing.signal !== nextCache.signal,
+        previousModifyTime: existing && existing.modifyTime ? existing.modifyTime : "",
+        modifyTime: nextCache.modifyTime || "",
+        refreshedAt: nextCache.refreshedAt,
+        requiredItemCount: nextCache.stats.requiredItemCount,
+        personTaskItemCount: nextCache.stats.personTaskItemCount,
+        durationMs: Date.now() - startedAt
+      };
+      if (logger && typeof logger.info === "function") {
+        logger.info("Dev progress H5 cache synced from required-field scan", syncResult);
+      }
+      return syncResult;
+    } catch (error) {
+      const failed = {
+        enabled: true,
+        ok: false,
+        synced: false,
+        reason: "cache_write_failed",
+        message: error && error.message ? error.message : String(error || ""),
+        durationMs: Date.now() - startedAt
+      };
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("Dev progress H5 cache sync from required-field scan failed", failed);
+      }
+      return failed;
+    }
+  }
+
   async function refreshH5MonitorCache(refreshOptions = {}) {
     if (h5MonitorRefreshPromise) {
       return h5MonitorRefreshPromise;
@@ -2481,7 +2589,7 @@ function createDevProgressModule(options = {}) {
         };
       }
 
-      const scan = await runAnomalyScan({ limit });
+      const scan = await executeAnomalyScan({ limit });
       if (!scan.scanResult.ok) {
         if (existing && existing.ok !== false) {
           const staleCache = {
@@ -2588,7 +2696,7 @@ function createDevProgressModule(options = {}) {
   }
 
   async function scanAnomalies(scanOptions = {}) {
-    const { settings, readResult, scanResult } = await runAnomalyScan(scanOptions);
+    const { settings, readResult, scanResult } = await executeAnomalyScan(scanOptions);
     if (!scanResult.ok) {
       return scanResult;
     }
@@ -2607,10 +2715,17 @@ function createDevProgressModule(options = {}) {
   }
 
   async function prepareRequiredFieldPush(scanOptions = {}) {
-    const { settings, readResult, scanResult } = await runAnomalyScan(scanOptions);
+    const { settings, rules, readResult, scanResult } = await executeAnomalyScan(scanOptions);
     if (!scanResult.ok) {
       return scanResult;
     }
+
+    const h5CacheSync = await syncH5MonitorCacheFromPreparedScan({
+      settings,
+      rules,
+      readResult,
+      scanResult
+    }, scanOptions);
 
     const workflowRules = getDemandWorkflowRulesSettings().normalizedRules;
     const traceRequest = scanOptions.requiredFieldTrace && typeof scanOptions.requiredFieldTrace === "object"
@@ -2780,6 +2895,7 @@ function createDevProgressModule(options = {}) {
           targets,
           unresolved
         },
+        h5CacheSync,
         requiredFieldTrace
       };
     }
@@ -2802,6 +2918,7 @@ function createDevProgressModule(options = {}) {
         targets,
         unresolved
       },
+      h5CacheSync,
       requiredFieldTrace
     };
   }

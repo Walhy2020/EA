@@ -58,7 +58,8 @@ assert(html.includes('id="projectSettingsDialog"'), "页面必须包含项目设
 assert(html.includes('id="showAllProjectsInput"'), "项目设置必须支持启用全部项目");
 assert(html.includes('id="allProjectsOptions"'), "项目设置必须支持配置全部项目包含范围");
 assert(html.includes('id="projectOrderList"'), "项目设置必须支持调整项目顺序");
-assert(/demand-project-settings\.js\?v=0\.3\.1[\s\S]*demand-h5\.js\?v=0\.3\.1/.test(html), "项目设置模块必须先于主页面脚本加载");
+assert(/demand-project-settings\.js\?v=0\.3\.2[\s\S]*demand-h5\.js\?v=0\.3\.2/.test(html), "项目设置模块必须先于主页面脚本加载");
+assert(js.includes('const H5_PAGE_VERSION = "0.3.2"'), "页面请求必须携带最新版本号");
 assert(js.includes('params.set("forceRefresh", "1")'), "手动刷新必须请求服务端强制刷新");
 assert(js.includes('params.set("waitForRefresh", "1")'), "手动刷新必须等待最新总表扫描完成");
 assert(js.includes('dataStatus.textContent = "数据更新时间：正在读取最新需求总表..."'), "刷新期间必须显示明确状态");
@@ -70,6 +71,8 @@ assert(css.includes(".project-toolbar") && css.includes("grid-template-columns: 
 assert(css.includes(".project-settings-dialog") && css.includes(".project-order-button"), "项目设置窗口和排序按钮必须有完整样式");
 assert(server.includes('forceRefresh: url.searchParams.get("forceRefresh") === "1"'), "服务端日志必须记录强制刷新标记");
 assert(server.includes('waitForRefresh: url.searchParams.get("waitForRefresh") === "1"'), "服务端日志必须记录等待刷新标记");
+assert(server.includes("cacheRefreshedAt"), "服务端日志必须记录本次返回的缓存更新时间");
+assert(server.includes("cacheModifyTime"), "服务端日志必须记录本次返回的文档修改时间");
 
 console.log(JSON.stringify({
   passed: true,

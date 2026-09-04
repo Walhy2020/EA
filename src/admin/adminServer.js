@@ -156,6 +156,7 @@ function demandH5ReturnPath(value) {
 }
 
 function h5EntryRequestMeta(req, url, result) {
+  const cache = result && result.cache && typeof result.cache === "object" ? result.cache : {};
   return {
     entryId: String(req.headers["x-ea-demand-entry-id"] || "").slice(0, 80),
     entrySource: String(req.headers["x-ea-demand-entry-source"] || "").slice(0, 80),
@@ -165,6 +166,12 @@ function h5EntryRequestMeta(req, url, result) {
     waitForRefresh: url.searchParams.get("waitForRefresh") === "1",
     ignoredUserNameParameter: Boolean(url.searchParams.get("userName")),
     itemCount: Array.isArray(result && result.items) ? result.items.length : 0,
+    cacheVersion: Number(cache.version || 0),
+    cacheRefreshedAt: String(cache.refreshedAt || ""),
+    cacheSignalCheckedAt: String(cache.signalCheckedAt || ""),
+    cacheModifyTime: String(cache.modifyTime || ""),
+    cacheRefreshInProgress: Boolean(cache.refreshInProgress),
+    cacheNeedsRefresh: Boolean(cache.needsRefresh),
     ok: Boolean(result && result.ok)
   };
 }
@@ -2133,6 +2140,7 @@ function createAdminServer(options) {
       }
       const result = await modules.devProgress.prepareRequiredFieldPush({
         limit: body.limit,
+        syncH5MonitorCache: true,
         targetOverride: requiredFieldsPush.testMode
           ? {
             enabled: true,
