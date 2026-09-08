@@ -744,7 +744,9 @@ function inspectRequiredFields(record, rules, options = {}) {
   return filteredEntries.map((entry) => {
     const value = recordFieldValue(record, entry.fieldName);
     const normalizedValue = normalizedText(value);
-    const required = entry.fieldRule ? Boolean(entry.fieldRule.required) : true;
+    const required = entry.fieldRule
+      ? Boolean(entry.fieldRule.required) && fieldRuleConditionMatches(record, entry.fieldRule.requiredWhen || {})
+      : true;
     const problems = required && isEmptyRequiredValue(value)
       ? [validationProblem(entry.fieldName, "empty_value", `${entry.fieldName}不得为空`)]
       : [];

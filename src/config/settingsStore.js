@@ -574,6 +574,7 @@ function normalizeFieldMonitorRules(value) {
         endStatus: String(input.endStatus || "").trim(),
         monitorGroups: normalizeRequiredFieldNames(input.monitorGroups),
         required: Boolean(input.required),
+        requiredWhen: normalizeRuleCondition(input.requiredWhen),
         excludedDemandTypes: normalizeRequiredFieldNames(input.excludedDemandTypes),
         when: normalizeRuleCondition(input.when),
         leaderRole: String(input.leaderRole || "").trim(),

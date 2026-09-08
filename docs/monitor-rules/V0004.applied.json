@@ -1,7 +1,7 @@
 {
-  "version": "7.0.0",
+  "version": "4.0.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0007",
+  "sourceVersion": "V0004",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -156,9 +156,6 @@
         "验收中监控",
         "验收完-更新前监控",
         "更新完成后监控"
-      ],
-      "excludedDemandTypes": [
-        "bug"
       ]
     },
     {
@@ -557,17 +554,7 @@
       ],
       "monitorGroups": [
         "开发中监控"
-      ],
-      "requiredWhen": {
-        "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "已监修",
-          "已提交",
-          "日方制作中"
-        ],
-        "requireSourceValue": false
-      }
+      ]
     },
     {
       "field": "UI日方时间",
@@ -600,16 +587,7 @@
       ],
       "monitorGroups": [
         "开发中监控"
-      ],
-      "requiredWhen": {
-        "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "已监修",
-          "已提交"
-        ],
-        "requireSourceValue": false
-      }
+      ]
     },
     {
       "field": "UI剩余时间",
@@ -653,17 +631,7 @@
         "开发中监控",
         "验收中监控",
         "验收完-更新前监控"
-      ],
-      "requiredWhen": {
-        "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "已监修",
-          "已提交",
-          "日方制作中"
-        ],
-        "requireSourceValue": false
-      }
+      ]
     },
     {
       "field": "监修时间",
@@ -732,17 +700,7 @@
       ],
       "monitorGroups": [
         "开发中监控"
-      ],
-      "requiredWhen": {
-        "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "已监修",
-          "已提交",
-          "日方制作中"
-        ],
-        "requireSourceValue": false
-      }
+      ]
     },
     {
       "field": "UI完成时间",
@@ -778,17 +736,7 @@
       ],
       "monitorGroups": [
         "开发中监控"
-      ],
-      "requiredWhen": {
-        "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "已监修",
-          "已提交",
-          "日方制作中"
-        ],
-        "requireSourceValue": false
-      }
+      ]
     },
     {
       "field": "前端_周",
