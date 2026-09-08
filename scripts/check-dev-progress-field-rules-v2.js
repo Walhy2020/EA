@@ -51,7 +51,7 @@ assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
 assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
 assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 39);
-assert.strictEqual(normalizedFromSettings.sourceVersion, "V0007");
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0008");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
 assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
 
@@ -68,8 +68,8 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "7.0.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0007");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "8.0.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0008");
 assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
 assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 39);
 

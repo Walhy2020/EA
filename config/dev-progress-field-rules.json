@@ -1,7 +1,7 @@
 {
-  "version": "7.0.0",
+  "version": "8.0.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0007",
+  "sourceVersion": "V0008",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -562,9 +562,11 @@
         "field": "UI进度",
         "notEquals": [
           "制作完成(未监修或提交)",
+          "制作完成（未监修或提交）",
           "已监修",
           "已提交",
-          "日方制作中"
+          "日方制作中",
+          "替换图已拆完"
         ],
         "requireSourceValue": false
       }
@@ -605,8 +607,11 @@
         "field": "UI进度",
         "notEquals": [
           "制作完成(未监修或提交)",
+          "制作完成（未监修或提交）",
           "已监修",
-          "已提交"
+          "已提交",
+          "日方制作中",
+          "替换图已拆完"
         ],
         "requireSourceValue": false
       }
@@ -658,9 +663,11 @@
         "field": "UI进度",
         "notEquals": [
           "制作完成(未监修或提交)",
+          "制作完成（未监修或提交）",
           "已监修",
           "已提交",
-          "日方制作中"
+          "日方制作中",
+          "替换图已拆完"
         ],
         "requireSourceValue": false
       }
@@ -737,9 +744,11 @@
         "field": "UI进度",
         "notEquals": [
           "制作完成(未监修或提交)",
+          "制作完成（未监修或提交）",
           "已监修",
           "已提交",
-          "日方制作中"
+          "日方制作中",
+          "替换图已拆完"
         ],
         "requireSourceValue": false
       }
@@ -783,9 +792,11 @@
         "field": "UI进度",
         "notEquals": [
           "制作完成(未监修或提交)",
+          "制作完成（未监修或提交）",
           "已监修",
           "已提交",
-          "日方制作中"
+          "日方制作中",
+          "替换图已拆完"
         ],
         "requireSourceValue": false
       }
