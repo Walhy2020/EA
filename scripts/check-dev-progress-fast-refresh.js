@@ -61,7 +61,7 @@ function scanBundle(records, scanOptions = {}) {
       issueCount: 0,
       anomalies: [],
       rules: {
-        requiredFieldRuleSourceVersion: "V0008",
+        requiredFieldRuleSourceVersion: "V0009",
         requiredFieldRuleCount: 39,
         requiredFieldAvailableRuleCount: 39,
         requiredFieldUnavailableRuleCount: 0,
@@ -75,7 +75,7 @@ function scanBundle(records, scanOptions = {}) {
 function initialCache() {
   return {
     ok: true,
-    version: 23,
+    version: 24,
     signal: "signal-1",
     modifyTime: "1",
     signalCheckedAt: "2026-09-04T01:00:00.000Z",

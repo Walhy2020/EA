@@ -10,7 +10,7 @@ assert.strictEqual(requiredFields.ruleFile, "config/dev-progress-field-rules.jso
 assert.deepStrictEqual(requiredFields.fieldFilters, []);
 assert.deepStrictEqual(requiredFields.items, []);
 assert.strictEqual(requiredFields.fallbackOwner, "王谦");
-assert.deepStrictEqual(requiredFields.fallbackOwners, ["王谦", "李晶晶"]);
+assert.deepStrictEqual(requiredFields.fallbackOwners, ["王谦", "李晶晶", "刘晓明"]);
 assert.ok(requiredFields.fieldRules.length > 0);
 
 const monitoredFields = new Set(requiredFields.fieldRules.map((item) => item.field));
@@ -35,8 +35,8 @@ assert.ok(monitoredFields.has("特效制作耗时"));
 assert.ok(monitoredFields.has("特效制作剩余"));
 assert.ok(monitoredFields.has("动作制作耗时"));
 assert.ok(monitoredFields.has("动作制作剩余"));
-assert.strictEqual(requiredFields.sourceVersion, "V0008");
-assert.strictEqual(requiredFields.version, "8.0.0");
+assert.strictEqual(requiredFields.sourceVersion, "V0009");
+assert.strictEqual(requiredFields.version, "9.0.0");
 assert.deepStrictEqual(requiredFields.statusGroups, {
   "开发中监控": ["待分配", "规划中", "实现中"],
   "验收中监控": ["内网验收中", "验收后bug修改中", "内网测试中", "测试2验收中", "测试2测试中", "测试1验收/测试中", "测试阻塞"],

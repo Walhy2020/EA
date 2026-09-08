@@ -51,9 +51,9 @@ assert.strictEqual(normalizedFromSettings.mode, "fieldRulesV2");
 assert.strictEqual(normalizedFromSettings.ruleFile, "config/dev-progress-field-rules.json");
 assert.strictEqual(normalizedFromSettings.fieldRules.length, 39);
 assert.strictEqual(normalizedFromSettings.fieldRules.filter((rule) => rule.endStatus).length, 39);
-assert.strictEqual(normalizedFromSettings.sourceVersion, "V0008");
+assert.strictEqual(normalizedFromSettings.sourceVersion, "V0009");
 assert.strictEqual(normalizedFromSettings.fallbackOwner, "王谦");
-assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶"]);
+assert.deepStrictEqual(normalizedFromSettings.fallbackOwners, ["王谦", "李晶晶", "刘晓明"]);
 
 assert.strictEqual(fieldDecisions("需求名称", {}, { status: "待分配" }).length, 0);
 assert.ok(fieldDecisions("需求名称", {}, { status: "规划中" }).some((item) => item.missing));
@@ -68,8 +68,8 @@ const scanSummary = scanDevProgressAnomalies([record({}, { status: "规划中" }
   requiredFields
 });
 assert.strictEqual(scanSummary.rules.requiredFieldRuleMode, "fieldRulesV2");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "8.0.0");
-assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0008");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleVersion, "9.0.0");
+assert.strictEqual(scanSummary.rules.requiredFieldRuleSourceVersion, "V0009");
 assert.strictEqual(scanSummary.rules.requiredFieldRuleCount, 39);
 assert.strictEqual(scanSummary.rules.requiredFieldBoundedRuleCount, 39);
 
@@ -160,23 +160,23 @@ assert.strictEqual(fieldDecisions("UI人员", { UI需求: "-" }).length, 0);
 assert.ok(fieldDecisions("UI人员", { UI需求: "需要UI", 策划人员: "张三" }).some((item) => item.missing));
 
 const plannerOwners = ownerNames(fieldDecisions("需求内容", { 策划人员: "张三" }));
-assert.deepStrictEqual(plannerOwners, ["张三", "时振兴", "王谦", "李晶晶"].sort());
+assert.deepStrictEqual(plannerOwners, ["张三", "王谦", "李晶晶", "刘晓明"].sort());
 const uiOwners = ownerNames(fieldDecisions("UI进度", { UI需求: "需要UI", UI人员: "李四" }));
-assert.deepStrictEqual(uiOwners, ["李四", "王谦", "李晶晶"].sort());
+assert.deepStrictEqual(uiOwners, ["李四", "王谦", "李晶晶", "刘晓明"].sort());
 const uiFallbackOnly = fieldDecisions("UI进度", { UI需求: "需要UI", UI人员: "" });
-assert.deepStrictEqual(ownerNames(uiFallbackOnly), ["王谦", "李晶晶"].sort());
-assert.strictEqual(uiFallbackOnly.filter((item) => item.ownerNames.includes("王谦")).length, 1);
+assert.deepStrictEqual(ownerNames(uiFallbackOnly), ["王谦", "李晶晶", "刘晓明"].sort());
+assert.strictEqual(uiFallbackOnly.filter((item) => item.ownerNames.includes("王谦")).length, 2);
 assert.strictEqual(uiFallbackOnly.filter((item) => item.ownerNames.includes("李晶晶")).length, 1);
 const frontendOwners = ownerNames(fieldDecisions("前端剩余", {
   前端开发: "赵鹏",
   前端组长: "胡锦南"
 }));
-assert.deepStrictEqual(frontendOwners, ["赵鹏", "胡锦南", "王谦", "李晶晶"].sort());
+assert.deepStrictEqual(frontendOwners, ["赵鹏", "胡锦南", "王谦", "李晶晶", "刘晓明"].sort());
 const frontendFallbackOnly = fieldDecisions("前端开发", {
   前端开发: "",
   前端组长: ""
 });
-assert.deepStrictEqual(ownerNames(frontendFallbackOnly), ["王谦", "李晶晶"].sort());
+assert.deepStrictEqual(ownerNames(frontendFallbackOnly), ["王谦", "李晶晶", "刘晓明"].sort());
 
 const workdayDates = [
   "2026-08-31",

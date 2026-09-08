@@ -44,7 +44,7 @@ function scanBundle() {
       issueCount: 0,
       anomalies: [],
       rules: {
-        requiredFieldRuleSourceVersion: "V0008",
+        requiredFieldRuleSourceVersion: "V0009",
         requiredFieldRuleCount: 39,
         requiredFieldAvailableRuleCount: 38,
         requiredFieldUnavailableRuleCount: 1,
@@ -70,7 +70,7 @@ async function main() {
     }),
     readH5MonitorCacheFile: () => ({
       ok: true,
-      version: 23,
+      version: 24,
       signal: "test-doc|test-sheet|test-view|1788486071",
       modifyTime: "1788486071",
       refreshedAt: "2026-09-04T01:45:20.000Z",

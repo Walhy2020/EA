@@ -1,7 +1,7 @@
 {
-  "version": "8.0.0",
+  "version": "9.0.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0008",
+  "sourceVersion": "V0009",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -28,7 +28,8 @@
   "fallbackOwner": "王谦",
   "fallbackOwners": [
     "王谦",
-    "李晶晶"
+    "李晶晶",
+    "刘晓明"
   ],
   "calendar": {
     "sheetName": "工作日",
@@ -42,9 +43,23 @@
       ]
     },
     "策划组长": {
-      "names": [
-        "时振兴"
-      ]
+      "memberField": "策划人员",
+      "memberGroups": {
+        "李东": [
+          "许翔宇",
+          "刘飞",
+          "刘宇",
+          "李海龙",
+          "汪永浩"
+        ],
+        "时振兴": [
+          "陈知白",
+          "贾红亮",
+          "高文龙",
+          "李东",
+          "李猛"
+        ]
+      }
     },
     "测试组长": {
       "names": [

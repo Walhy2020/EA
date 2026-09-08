@@ -326,7 +326,7 @@ function uniqueFieldEntries(entries) {
     const ownerKey = Array.isArray(entry.ownerNames) && entry.ownerNames.length > 0
       ? entry.ownerNames.join("、")
       : entry.owner || "";
-    const entryKey = `${entry.fieldName || ""}||${ownerKey}`;
+    const entryKey = `${entry.fieldName || ""}||${ownerKey}||${entry.responsibilityKind || ""}`;
     if (!entry.fieldName || seenEntries.has(entryKey)) {
       continue;
     }
@@ -410,6 +410,12 @@ function fieldRuleLeaderNames(record, fieldRule, requiredRule) {
     ? requiredRule.leaders
     : {};
   const leader = leaders[normalizedText(fieldRule.leaderRole)] || {};
+  if (leader.memberField) {
+    const assigned = splitPeople(recordFieldValue(record, leader.memberField));
+    return uniqueValues(Object.entries(leader.memberGroups || {})
+      .filter(([, members]) => assigned.some((name) => members.includes(name)))
+      .map(([name]) => name));
+  }
   return uniqueValues([
     ...(Array.isArray(leader.names) ? leader.names : []),
     ...splitPeople(leader.sourceField ? recordFieldValue(record, leader.sourceField) : "")
@@ -431,6 +437,7 @@ function requiredFieldEntriesFromFieldRules(record, requiredRule) {
         fieldName: fieldRule.field,
         owner: memberNames.join("、"),
         ownerNames: memberNames,
+        responsibilityKind: "member",
         ruleStatus: normalizedText(fieldRule.startStatus),
         isFallbackOwner: false,
         fieldRule
@@ -441,6 +448,7 @@ function requiredFieldEntriesFromFieldRules(record, requiredRule) {
         fieldName: fieldRule.field,
         owner: leaderNames.join("、"),
         ownerNames: leaderNames,
+        responsibilityKind: "leader",
         ruleStatus: normalizedText(fieldRule.startStatus),
         isFallbackOwner: true,
         fieldRule
@@ -451,6 +459,7 @@ function requiredFieldEntriesFromFieldRules(record, requiredRule) {
         fieldName: fieldRule.field,
         owner: fallbackName,
         ownerNames: [fallbackName],
+        responsibilityKind: "fallback",
         ruleStatus: normalizedText(fieldRule.startStatus),
         isFallbackOwner: true,
         fieldRule
@@ -922,11 +931,12 @@ function scanRequiredFields(record, rules, result, options = {}) {
   const grouped = new Map();
   for (const entry of missingEntries) {
     const ownerNames = Array.isArray(entry.ownerNames) ? entry.ownerNames : [];
-    const ownerKey = ownerNames.length > 0 ? ownerNames.join("、") : "";
+    const ownerKey = `${ownerNames.join("、")}||${entry.responsibilityKind || ""}`;
     if (!grouped.has(ownerKey)) {
       grouped.set(ownerKey, {
         owner: entry.owner || "",
         ownerNames,
+        responsibilityKind: entry.responsibilityKind,
         missingFields: [],
         fieldProblems: [],
         isFallbackOwner: Boolean(entry.isFallbackOwner)
@@ -948,6 +958,7 @@ function scanRequiredFields(record, rules, result, options = {}) {
       status: standard.status || "",
       owner: group.owner || "",
       ownerNames: group.ownerNames,
+      responsibilityKind: group.responsibilityKind,
       missingFields: group.missingFields,
       fieldProblems: group.fieldProblems,
       isFallbackOwner: Boolean(group.isFallbackOwner)

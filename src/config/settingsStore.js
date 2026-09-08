@@ -604,7 +604,13 @@ function normalizeRuleLeaders(value) {
       const role = roleValue && typeof roleValue === "object" && !Array.isArray(roleValue) ? roleValue : {};
       return [String(roleName || "").trim(), {
         names: normalizeRequiredFieldNames(role.names),
-        sourceField: String(role.sourceField || "").trim()
+        sourceField: String(role.sourceField || "").trim(),
+        memberField: String(role.memberField || "").trim(),
+        memberGroups: Object.fromEntries(Object.entries(
+          role.memberGroups && typeof role.memberGroups === "object" && !Array.isArray(role.memberGroups)
+            ? role.memberGroups : {}
+        ).map(([name, members]) => [String(name).trim(), normalizeRequiredFieldNames(members)])
+          .filter(([name]) => name))
       }];
     })
     .filter(([roleName]) => roleName));

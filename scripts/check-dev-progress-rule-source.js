@@ -4,7 +4,7 @@ const { getDevProgressSettings } = require("../src/config/settingsStore");
 const { inspectRequiredFields } = require("../src/modules/devProgress/anomalyScanner");
 const rules = getDevProgressSettings().rules;
 const config = rules.requiredFields;
-assert.strictEqual(config.sourceVersion, "V0008");
+assert.strictEqual(config.sourceVersion, "V0009");
 const source = require(`../docs/monitor-rules/${config.sourceVersion}.source.json`);
 const rows = source.sheets[0].rows.filter(({ cells }) => ["是", "看需求类型"].includes(cells[1]));
 assert.strictEqual(config.fieldRules.length, rows.length);
@@ -15,7 +15,15 @@ for (const { cells } of rows) {
   assert.deepStrictEqual(rule.monitorGroups, cells[4].split(","));
   assert.deepStrictEqual(rule.excludedDemandTypes.slice().sort(), (cells[5] || "").split(",").filter(Boolean).sort());
   assert.strictEqual(rule.leaderRole, cells[6]);
+  assert.deepStrictEqual(rule.memberFields, (cells[7] || "").split(",").filter(Boolean));
 }
+const globalRows = source.sheets[1].rows.map(({ cells }) => cells);
+const plannerGroups = globalRows.filter((cells) => cells[0] === "策划组长");
+assert.strictEqual(config.leaders["策划组长"].memberField, "策划人员");
+assert.deepStrictEqual(config.leaders["策划组长"].memberGroups, Object.fromEntries(
+  plannerGroups.map((cells) => [cells[1], cells[3].split("、")])
+));
+assert.deepStrictEqual(config.fallbackOwners, globalRows.find((cells) => cells[0] === "兜底人").slice(1).filter(Boolean));
 function inspect(field, values, status = "实现中", demandType = "新功能") {
   return inspectRequiredFields({
     recordId: "rule-source-test",
