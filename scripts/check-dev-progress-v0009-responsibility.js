@@ -85,12 +85,24 @@ async function main() {
   const li = await module.listRequiredFieldItems({ userName: "李东", forceRefresh: true, waitForRefresh: true });
   assert(li.ok);
   assert.deepStrictEqual(li.items.map((item) => item.demandId).sort(), ["li-group", "li-own", "mixed"].sort());
+  assert(li.isLeader);
+  assert.deepStrictEqual(li.memberViews.map((view) => view.name), groups["李东"]);
+  assert.deepStrictEqual(li.selfItems.map((item) => item.demandId), ["li-own"]);
+  for (const view of li.memberViews) {
+    const personal = await module.listRequiredFieldItems({ userName: view.name });
+    assert(!personal.isLeader);
+    assert.deepStrictEqual(view.items, personal.items, "member tab must equal the member's own page");
+  }
   const shi = await module.listRequiredFieldItems({ userName: "时振兴" });
   assert.deepStrictEqual(shi.items.map((item) => item.demandId).sort(), ["shi-group", "li-own", "mixed"].sort());
+  assert.deepStrictEqual(shi.memberViews.find((view) => view.name === "李东").items, li.selfItems,
+    "a nested leader's tab includes personal duties, not their entire team");
   const liLeader = __test.requiredFieldLeaderViewItems(persisted, testSettings, "李东");
   assert.deepStrictEqual(liLeader.map((item) => item.demandId).sort(), ["li-group", "mixed"]);
   const liu = await module.listRequiredFieldItems({ userName: "刘晓明" });
   assert.deepStrictEqual(liu.items.map((item) => item.demandId), ["fallback-own"]);
+  assert(!liu.isLeader);
+  assert.deepStrictEqual(liu.memberViews, []);
   for (const name of required.fallbackOwners) {
     const fallback = await module.listRequiredFieldItems({ userName: name, scope: "fallback" });
     assert.strictEqual(new Set(fallback.items.map((item) => item.demandId)).size, records.length);

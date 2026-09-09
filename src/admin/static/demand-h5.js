@@ -78,7 +78,7 @@ const leaderSupplementTitle = document.getElementById("leaderSupplementTitle");
 const leaderSupplementFields = document.getElementById("leaderSupplementFields");
 const DEFAULT_PROJECT_NAME = "恶魔高校";
 const FALLBACK_VIEWER_NAMES = new Set(["王谦", "李晶晶", "刘晓明"]);
-const H5_PAGE_VERSION = "0.3.7";
+const H5_PAGE_VERSION = "0.3.8";
 const ENTRY_CONTEXT = window.EADemandEntryContext || {};
 const FALLBACK_LEADER_FILTER_API = window.EADemandFallbackLeaderFilter || null;
 const DEMAND_LOCATOR_NAVIGATION = window.EADemandLocatorNavigation || null;
@@ -122,6 +122,53 @@ const drafts = [];
 const todos = [];
 const memberTodos = [];
 const requiredFieldItems = [];
+const requiredMemberTabs = document.getElementById("requiredMemberTabs");
+let requiredMemberViews = [];
+let requiredSelfItems = [];
+let requiredIsLeader = false;
+let selectedRequiredMember = "all";
+
+function replaceRequiredMemberViews(data) {
+  requiredIsLeader = Boolean(data.isLeader);
+  requiredSelfItems = filterItemsForSelectedProject(data.selfItems || []).map(normalizeRequiredFieldItem);
+  requiredMemberViews = (data.memberViews || []).map((view) => ({
+    name: view.name,
+    items: filterItemsForSelectedProject(view.items || []).map(normalizeRequiredFieldItem)
+  }));
+  if (!requiredIsLeader || (selectedRequiredMember !== "all" && selectedRequiredMember !== "self"
+    && !requiredMemberViews.some((view) => `member:${view.name}` === selectedRequiredMember))) {
+    selectedRequiredMember = "all";
+  }
+}
+
+function visibleRequiredFieldItems() {
+  if (!requiredIsLeader || selectedRequiredMember === "all") return requiredFieldItems;
+  if (selectedRequiredMember === "self") return requiredSelfItems;
+  return requiredMemberViews.find((view) => `member:${view.name}` === selectedRequiredMember)?.items || [];
+}
+
+function renderRequiredMemberTabs() {
+  if (!requiredMemberTabs) return;
+  requiredMemberTabs.hidden = !requiredIsLeader;
+  requiredMemberTabs.replaceChildren();
+  if (!requiredIsLeader) return;
+  const options = [
+    { key: "all", label: "全部", count: requiredFieldItems.length },
+    { key: "self", label: "本人", count: requiredSelfItems.length },
+    ...requiredMemberViews.map((view) => ({ key: `member:${view.name}`, label: view.name, count: view.items.length }))
+  ];
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "required-member-tab";
+    button.dataset.memberKey = option.key;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(selectedRequiredMember === option.key));
+    button.tabIndex = selectedRequiredMember === option.key ? 0 : -1;
+    button.textContent = `${option.label} ${option.count}`;
+    requiredMemberTabs.appendChild(button);
+  }
+}
 const fallbackRequiredFieldItems = [];
 let fallbackLeaderFilters = [];
 let selectedFallbackLeaderNames = new Set();
@@ -1151,6 +1198,7 @@ async function loadDraftsFromServer(options = {}) {
     const result = await requestJson(`/api/dev-progress/required-field-items?${params.toString()}`);
     const devProgress = result.devProgress || {};
     updateDataStatus(cacheDisplayTime(devProgress.cache));
+    replaceRequiredMemberViews(devProgress);
     replaceRequiredFieldItems(filterItemsForSelectedProject(Array.isArray(devProgress.items) ? devProgress.items : []));
     return devProgress.cache || null;
   } catch (error) {
@@ -1446,7 +1494,7 @@ function showDraftEmpty() {
   }
   if (draftEmpty) {
     draftEmpty.hidden = listLoading;
-    draftEmpty.textContent = "暂无字段待补充";
+    draftEmpty.textContent = selectedRequiredMember === "all" ? "暂无字段待补充" : "该成员暂无字段待补充";
   }
   if (draftList) {
     draftList.hidden = true;
@@ -1513,7 +1561,7 @@ function renderRequiredItemList(listNode, items, datasetName) {
 
 function renderDraftList() {
   updateCreatedTimeSortButton(draftTabButton, draftNewestFirst);
-  renderRequiredItemList(draftList, sortedRequiredFieldItems(requiredFieldItems, draftNewestFirst), "requiredItemId");
+  renderRequiredItemList(draftList, sortedRequiredFieldItems(visibleRequiredFieldItems(), draftNewestFirst), "requiredItemId");
 }
 
 function renderFallbackList() {
@@ -1762,7 +1810,7 @@ function visibleDraftsForCurrentUser() {
 }
 
 function refreshDraftCount() {
-  updateDraftCount(requiredFieldItems.length);
+  updateDraftCount(visibleRequiredFieldItems().length);
 }
 
 function refreshFallbackCount() {
@@ -1932,8 +1980,9 @@ function renderDraftDetail(draft, context = {}) {
 
 function renderDraftPanel() {
   updateCreatedTimeSortButton(draftTabButton, draftNewestFirst);
-  updateDraftCount(requiredFieldItems.length);
-  if (requiredFieldItems.length === 0) {
+  renderRequiredMemberTabs();
+  updateDraftCount(visibleRequiredFieldItems().length);
+  if (visibleRequiredFieldItems().length === 0) {
     showDraftEmpty();
     return;
   }
@@ -2132,7 +2181,7 @@ if (draftList) {
   draftList.addEventListener("click", async (event) => {
     const requiredTarget = event.target.closest("[data-required-item-id]");
     if (requiredTarget) {
-      const requiredItem = requiredFieldItems.find((item) => item.id === requiredTarget.dataset.requiredItemId);
+      const requiredItem = visibleRequiredFieldItems().find((item) => item.id === requiredTarget.dataset.requiredItemId);
       if (requiredItem) {
         await openDemandLocator(requiredItem);
       }
@@ -2159,6 +2208,34 @@ if (fallbackList) {
     if (fallbackItem) {
       await openDemandLocator(fallbackItem);
     }
+  });
+}
+
+if (requiredMemberTabs) {
+  requiredMemberTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-member-key]");
+    if (!button || !requiredMemberTabs.contains(button)) return;
+    selectedRequiredMember = button.dataset.memberKey;
+    console.info("Demand H5 required member tab selected", {
+      memberKey: selectedRequiredMember,
+      itemCount: visibleRequiredFieldItems().length
+    });
+    renderDraftPanel();
+    [...requiredMemberTabs.querySelectorAll("[role=tab]")]
+      .find((tab) => tab.dataset.memberKey === selectedRequiredMember)?.focus();
+    scrollActivePanelToTop("draft");
+  });
+  requiredMemberTabs.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = [...requiredMemberTabs.querySelectorAll("[role=tab]")];
+    const index = buttons.indexOf(event.target);
+    if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    const key = buttons[next].dataset.memberKey;
+    buttons[next].click();
+    [...requiredMemberTabs.querySelectorAll("[role=tab]")].find((button) => button.dataset.memberKey === key)?.focus();
   });
 }
 

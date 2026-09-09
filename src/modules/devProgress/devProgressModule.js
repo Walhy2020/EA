@@ -31,7 +31,7 @@ const SCAN_PAGE_CONCURRENCY = 2;
 const FULL_SCAN_REUSE_MS = 30 * 1000;
 const RECENT_TASK_TTL_MS = 30 * 60 * 1000;
 const RECENT_TASK_LIMIT_PER_USER = 20;
-const DEV_PROGRESS_MODULE_VERSION = "0.3.7";
+const DEV_PROGRESS_MODULE_VERSION = "0.3.8";
 const H5_MONITOR_CACHE_VERSION = 24;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
@@ -798,12 +798,14 @@ function leaderMemberScopesForPerson(personName, personAliases = {}, settings = 
       ? role.leaderMemberNames
       : {};
     let memberNames = [];
+    let hasMemberMapping = false;
     for (const [leaderName, mappedMemberNames] of Object.entries(leaderMemberNames)) {
       if (personNameMatches(leaderName, personName, personAliases)) {
+        hasMemberMapping = true;
         memberNames.push(...uniqueMerge(mappedMemberNames));
       }
     }
-    if (memberNames.length === 0) {
+    if (!hasMemberMapping) {
       memberNames = uniqueMerge(role && Array.isArray(role.memberNames) ? role.memberNames : []);
     }
     scopes.push({
@@ -923,6 +925,41 @@ function requiredFieldItemForFallbackScope(item = {}, allowedFieldSet) {
     missingFields: fallbackMissingFields,
     fieldProblems: fieldProblemsForFields(item.fieldProblems, fallbackMissingFields),
     ownerType: "fallback"
+  };
+}
+
+function directRequiredFieldItems(cache = {}, settings = {}, personName = "", projectFilter) {
+  return mergeRequiredFieldViewItems((cache.requiredItems || [])
+    .filter((item) => personNameMatches(item.ownerName, personName, settings.personAliases || {}))
+    .filter((item) => projectMatchesFilter(item.project, projectFilter))
+    .map((item) => {
+      const fields = Array.isArray(item.directMissingFields)
+        ? item.directMissingFields
+        : (requiredFieldItemIsFallback(item) ? [] : item.missingFields || []);
+      return {
+        ...item,
+        missingFields: fields,
+        fieldProblems: fieldProblemsForFields(item.fieldProblems, fields),
+        directMissingFields: fields,
+        leaderMissingFields: [],
+        leaderNames: [],
+        isFallbackOwner: false,
+        ownerType: "direct"
+      };
+    })
+    .filter((item) => item.missingFields.length > 0));
+}
+
+function requiredFieldMemberViews(cache, settings, personName, projectFilter, workflowRulesOverride) {
+  const scopes = leaderMemberScopesForPerson(personName, settings.personAliases || {}, settings, workflowRulesOverride);
+  const members = uniqueMerge(scopes.flatMap((scope) => scope.memberNames))
+    .filter((name) => !personNameMatches(name, personName, settings.personAliases || {}));
+  return {
+    isLeader: scopes.length > 0,
+    views: members.map((name) => {
+      const items = sortH5TaskItems(directRequiredFieldItems(cache, settings, name, projectFilter));
+      return { name, total: items.length, items };
+    })
   };
 }
 
@@ -3504,10 +3541,12 @@ function createDevProgressModule(options = {}) {
     const leaderItems = fallbackOnly
       ? []
       : requiredFieldLeaderViewItems(cache, settings, userName, projectFilter);
-    const directOwnerItems = fallbackOnly ? [] : ownerItems;
+    const directOwnerItems = fallbackOnly ? [] : directRequiredFieldItems(cache, settings, userName, projectFilter);
+    const memberView = fallbackOnly ? { isLeader: false, views: [] }
+      : requiredFieldMemberViews(cache, settings, userName, projectFilter, workflowRulesProvider().normalizedRules);
     const items = fallbackOnly
       ? [...fallbackLeaderItems, ...fallbackResidualItems]
-      : mergeRequiredFieldViewItems([...directOwnerItems, ...leaderItems]);
+      : mergeRequiredFieldViewItems([...directOwnerItems, ...leaderItems, ...memberView.views.flatMap((view) => view.items)]);
 
     if (logger && typeof logger.info === "function") {
       const isFallbackOwner = requiredFieldFallbackOwners(settings).some((fallbackOwner) => personNameMatches(
@@ -3524,7 +3563,9 @@ function createDevProgressModule(options = {}) {
         sourceItemCount: ownerItems.length,
         visibleItemCount: items.length,
         leaderRequiredFieldCount: leaderRequiredFieldSet.size,
-        deniedNonLeader: !fallbackOnly && leaderRequiredFieldSet.size === 0,
+        isLeader: memberView.isLeader,
+        memberTabCount: memberView.views.length,
+        directItemCount: directOwnerItems.length,
         fallbackOwnerRoleSeparated: !fallbackOnly && isFallbackOwner,
         fallbackViewer: fallbackOnly && canReadFallbackScope,
         fallbackViewerCount: fallbackOnly ? requiredFieldFallbackViewerNames(settings).length : 0,
@@ -3533,7 +3574,7 @@ function createDevProgressModule(options = {}) {
           : 0,
         fallbackLeaderScopedItemCount: fallbackLeaderItems.length,
         fallbackResidualItemCount: fallbackResidualItems.length,
-        visibilitySource: fallbackOnly ? "requiredFieldLeaderViewItems+fallbackResidual" : "requiredFieldLeaderViewItems"
+        visibilitySource: fallbackOnly ? "requiredFieldLeaderViewItems+fallbackResidual" : "direct+leader+memberDirect"
       });
     }
 
@@ -3546,6 +3587,9 @@ function createDevProgressModule(options = {}) {
       scope: fallbackOnly ? "fallback" : "field",
       total: items.length,
       items: sortH5TaskItems(items),
+      isLeader: memberView.isLeader,
+      selfItems: sortH5TaskItems(directOwnerItems),
+      memberViews: memberView.views,
       leaderFilters: fallbackOnly && Array.isArray(cache.fallbackLeaderFilters)
         ? cache.fallbackLeaderFilters
         : [],
@@ -4165,6 +4209,8 @@ function createDevProgressModule(options = {}) {
 module.exports = {
   createDevProgressModule,
   __test: {
+    directRequiredFieldItems,
+    requiredFieldMemberViews,
     monitorWorkflowRules,
     leaderMemberScopesForPerson,
     collectRequiredFieldPushGroups,
