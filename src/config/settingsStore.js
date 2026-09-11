@@ -551,6 +551,7 @@ function normalizeFieldValidation(value) {
     type: String(input.type || "").trim(),
     startStatus: String(input.startStatus || "").trim(),
     endStatus: String(input.endStatus || "").trim(),
+    when: normalizeRuleCondition(input.when),
     values: normalizeRequiredFieldNames(input.values),
     maximum: Number.isFinite(maximum) ? maximum : null,
     amountField: String(input.amountField || "").trim(),

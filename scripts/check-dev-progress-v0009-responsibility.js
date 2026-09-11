@@ -121,9 +121,9 @@ async function main() {
   assert(memberTasks.ok);
   assert(memberTasks.leaderRoles.some((scope) => scope.memberNames.includes("刘飞")));
   assert(logs.some((entry) => entry.message === "Dev progress required-field access evaluated"
-    && entry.meta.ruleSourceVersion === "V0009"));
+    && entry.meta.ruleSourceVersion === "V0010"));
   assert.strictEqual(new Set(persisted.requiredItems.map((item) => item.ownerName + "|" + item.recordId)).size,
     persisted.requiredItems.length, "one task per recipient after responsibility merge");
-  console.log("V0009 member/leader/fallback routing, personal views, member scopes and cache checks passed");
+  console.log("V0010 member/leader/fallback routing, personal views, member scopes and cache checks passed");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

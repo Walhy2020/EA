@@ -593,6 +593,9 @@ function validationProblem(fieldName, code, message, details = {}) {
 }
 
 function fieldValidationIsActive(record, validation, requiredRule) {
+  if (!fieldRuleConditionMatches(record, validation.when || {})) {
+    return false;
+  }
   if (!normalizedText(validation.startStatus)) {
     return true;
   }

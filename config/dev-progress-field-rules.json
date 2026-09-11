@@ -1,7 +1,7 @@
 {
-  "version": "9.0.0",
+  "version": "10.0.0",
   "source": "需求总表字段监控归类.xlsx",
-  "sourceVersion": "V0009",
+  "sourceVersion": "V0010",
   "stageInclusive": true,
   "statusSequence": [
     "待分配",
@@ -190,6 +190,10 @@
         "验收中监控",
         "验收完-更新前监控",
         "更新完成后监控"
+      ],
+      "excludedDemandTypes": [
+        "bug",
+        "配置bug"
       ]
     },
     {
@@ -360,7 +364,7 @@
         "bug",
         "配置bug"
       ],
-      "leaderRole": "UI组长",
+      "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
       ],
@@ -377,7 +381,7 @@
         "bug",
         "配置bug"
       ],
-      "leaderRole": "动效组长",
+      "leaderRole": "策划组长",
       "memberFields": [
         "策划人员"
       ],
@@ -620,15 +624,10 @@
       ],
       "requiredWhen": {
         "field": "UI进度",
-        "notEquals": [
-          "制作完成(未监修或提交)",
-          "制作完成（未监修或提交）",
-          "已监修",
-          "已提交",
-          "日方制作中",
-          "替换图已拆完"
+        "equals": [
+          "日方制作中"
         ],
-        "requireSourceValue": false
+        "requireSourceValue": true
       }
     },
     {
@@ -666,7 +665,16 @@
           "type": "numberAtMost",
           "maximum": 0,
           "startStatus": "内网验收中",
-          "endStatus": "待上线"
+          "endStatus": "待上线",
+          "when": {
+            "field": "UI进度",
+            "notEquals": [
+              "替换图已全返",
+              "替换图部分拆完",
+              "替换图拆分中"
+            ],
+            "requireSourceValue": false
+          }
         }
       ],
       "monitorGroups": [
@@ -959,7 +967,7 @@
         {
           "type": "numberAtMost",
           "maximum": 0,
-          "startStatus": "内网验收中",
+          "startStatus": "测试服全完成",
           "endStatus": "待上线"
         }
       ],
@@ -1022,7 +1030,7 @@
         {
           "type": "numberAtMost",
           "maximum": 0,
-          "startStatus": "内网验收中",
+          "startStatus": "测试服全完成",
           "endStatus": "待上线"
         }
       ],
@@ -1083,7 +1091,7 @@
             "type": "today"
           },
           "deadlineFields": [
-            "动效制作交付日期",
+            "动效资源截止日期",
             "美术截止日期"
           ]
         },
@@ -1151,7 +1159,7 @@
             "type": "today"
           },
           "deadlineFields": [
-            "动效制作交付日期",
+            "动效资源截止日期",
             "美术截止日期"
           ]
         },
