@@ -693,9 +693,11 @@ async function main() {
       0,
       "存在可更新的发起人卡时不能另发反馈卡"
     );
-    const requesterFeedbackSyncResult = await linkedReminderWatchdog.syncAppRequesterFeedbackCardState(
-      mergedFeedbackResult.syncRequesterFeedbackState
-    );
+    const [requesterFeedbackSyncResult, concurrentFeedbackSyncResult] = await Promise.all([
+      linkedReminderWatchdog.syncAppRequesterFeedbackCardState(mergedFeedbackResult.syncRequesterFeedbackState),
+      linkedReminderWatchdog.syncAppRequesterFeedbackCardState(mergedFeedbackResult.syncRequesterFeedbackState)
+    ]);
+    assert.equal(concurrentFeedbackSyncResult.ok, true);
     assert.equal(requesterFeedbackSyncResult.ok, true);
     assert.deepEqual(linkedRecalledMessageIds, ["linked-2", "linked-3"]);
     const requesterFeedbackMessage = linkedMessages[3];
@@ -873,7 +875,7 @@ async function main() {
     }, null, 2)}\n`, "utf8");
     const pageFeedbackMessages = [];
     const pageFeedbackRecalledMessageIds = [];
-    const pageFeedbackWatchdog = createWatchdogModule({
+    const pageFeedbackOptions = {
       storeFile: pageFeedbackStoreFile,
       moduleConfig: {
         enabled: true,
@@ -898,7 +900,8 @@ async function main() {
         }
       },
       logger: { info() {}, warn() {} }
-    });
+    };
+    const pageFeedbackWatchdog = createWatchdogModule(pageFeedbackOptions);
     const pageReceipt = await pageFeedbackWatchdog.submitAppFeedback({
       taskId: "wd_page_feedback_merge",
       token: "page-feedback-token",
@@ -942,6 +945,46 @@ async function main() {
     assert.deepEqual(pageFeedbackMessages.at(-1).templateCard.button_list, [
       { text: "取消盯梢", key: "ea_watch_control_cancel", style: 3 }
     ]);
+    assert.equal(pageFeedbackMessages.filter((message) => message.purpose === "watchdog_result_notice").length, 0,
+      "successful merge must not be rediscovered as an undelivered result on tick");
+    const pageSendCount = pageFeedbackMessages.length;
+    const pageRecallCount = pageFeedbackRecalledMessageIds.length;
+    await pageFeedbackWatchdog.tick();
+    assert.equal(pageFeedbackMessages.length, pageSendCount);
+    assert.equal(pageFeedbackRecalledMessageIds.length, pageRecallCount, "completed repair must not recall the merged card again");
+
+    // Reproduce old persisted data: a successful merge followed by a late separate notice.
+    const historicalState = JSON.parse(fs.readFileSync(pageFeedbackStoreFile, "utf8"));
+    for (const task of historicalState.tasks) {
+      delete task.appRequesterFeedbackDeliveredResponseAt;
+      delete task.appRequesterFeedbackDeliveredMessageId;
+    }
+    const historicalTask = historicalState.tasks.find((task) => task.id === "wd_page_feedback_merge");
+    historicalTask.appResultNoticeResponseAt = historicalTask.responses[0].receivedAt;
+    historicalTask.appResultNoticeSentAt = new Date().toISOString();
+    historicalTask.appResultNoticeMessageId = "late-duplicate-feedback";
+    historicalTask.appResultNoticeRecalledAt = "";
+    historicalTask.pendingAppResultNotice = {
+      label: "正常推进", note: "stale retry", responseAt: historicalTask.responses[0].receivedAt
+    };
+    fs.writeFileSync(pageFeedbackStoreFile, JSON.stringify(historicalState), "utf8");
+    const restartedFeedbackWatchdog = createWatchdogModule(pageFeedbackOptions);
+    await restartedFeedbackWatchdog.tick();
+    assert.equal(pageFeedbackMessages.length, pageSendCount, "historical successful merge survives restart without resending");
+    assert.deepEqual(pageFeedbackRecalledMessageIds.slice(pageRecallCount), ["late-duplicate-feedback"],
+      "only the duplicate separate notice may be recalled, not the retained merged card");
+    await restartedFeedbackWatchdog.tick();
+    assert.equal(pageFeedbackMessages.length, pageSendCount);
+    assert.equal(pageFeedbackRecalledMessageIds.length, pageRecallCount + 1);
+    const newProgress = await restartedFeedbackWatchdog.submitAppFeedback({
+      taskId: "wd_page_feedback_merge", token: "page-feedback-token",
+      action: "progress", note: "后续的新反馈仍需通知"
+    });
+    assert.equal(newProgress.ok, true);
+    assert.equal(pageFeedbackMessages.length, pageSendCount + 1, "new feedback must still replace the current merged card");
+    assert.equal(pageFeedbackMessages.at(-1).purpose, "watchdog_requester_feedback_merged");
+    await restartedFeedbackWatchdog.tick();
+    assert.equal(pageFeedbackMessages.length, pageSendCount + 1);
 
     const mergeRetryStoreFile = path.join(directory, "feedback-card-merge-retry-tasks.json");
     const mergeRetryAssigneeCardTaskId = "ea_watch_wd_feedback_merge_retry_1788420000004";
@@ -1032,6 +1075,8 @@ async function main() {
     let mergeRetryTask = taskById(mergeRetryStoreFile, "wd_feedback_merge_retry");
     assert.equal(mergeRetryTask.pendingRequesterFeedbackCardSync.feedbackCardTaskId, mergeRetryFeedbackCardTaskId);
     assert.ok(mergeRetryTask.appPushMessages[1].recalledAt);
+    await mergeRetryWatchdog.tick();
+    assert.equal(mergeRetrySendCount, 1, "pending merge backoff must not send a separate result notice");
     const secondMergeAttempt = await mergeRetryWatchdog.syncAppRequesterFeedbackCardState(mergeRetryInput);
     assert.equal(secondMergeAttempt.ok, true);
     assert.deepEqual(mergeRetryRecalls, ["merge-retry-requester-message"]);

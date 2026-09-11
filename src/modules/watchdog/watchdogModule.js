@@ -3214,7 +3214,59 @@ function createWatchdogModule(options = {}) {
     return { ok: false, queued: true, retryAt, error: info.message };
   }
 
+  function mergedRequesterFeedbackMessageId(task, responseAt) {
+    if (!normalizeText(responseAt)) return "";
+    if (task.appRequesterFeedbackDeliveredResponseAt === responseAt) {
+      return normalizeText(task.appRequesterFeedbackDeliveredMessageId);
+    }
+    // Older installations recorded successful merges only on the replaced card.
+    const record = (task.appPushMessages || []).find((item) => (
+      item.targetRole === "requester" && item.feedbackSyncResponseAt === responseAt
+      && normalizeText(item.feedbackReplacementMessageId)
+    ));
+    return normalizeText(record && record.feedbackReplacementMessageId);
+  }
+
+  async function recallSupersededRequesterFeedback(task, responseAt, replacementMessageId) {
+    const separateId = normalizeText(task.appResultNoticeMessageId);
+    const activeReplacement = (task.appPushMessages || []).some((item) => (
+      item.targetRole === "requester" && item.msgid === replacementMessageId && !item.recalledAt
+    ));
+    if (!activeReplacement || !separateId || separateId === replacementMessageId
+      || task.appResultNoticeResponseAt !== responseAt || task.appResultNoticeRecalledAt) return;
+    const sentAt = dateValueMs(task.appResultNoticeSentAt);
+    if (!sentAt || Date.now() - sentAt > WECOM_APP_MESSAGE_RECALL_WINDOW_MS) return;
+    try {
+      const result = await appNotifier.recallMessage({
+        msgid: separateId, purpose: "watchdog_requester_feedback_separate_notice_cleanup"
+      });
+      if (!result || !result.ok) throw new Error((result && result.reason) || "独立盯梢反馈卡撤回失败");
+      task.appResultNoticeRecalledAt = new Date().toISOString();
+      task.appResultNoticeRecallLastError = "";
+      logger?.info?.("Watchdog superseded separate requester feedback card recalled", {
+        taskId: task.id, responseAt, messageIdConfigured: true, preservedMergedCard: true
+      });
+    } catch (error) {
+      task.appResultNoticeRecallLastError = errorInfo(error, "独立盯梢反馈卡撤回失败").message;
+      logger?.warn?.("Watchdog superseded separate requester feedback card recall failed", {
+        taskId: task.id, responseAt, message: task.appResultNoticeRecallLastError
+      });
+    }
+    save();
+  }
+
+  const requesterFeedbackSyncInFlight = new Map();
   async function syncAppRequesterFeedbackCardState(input = {}) {
+    const taskId = normalizeText(input.taskId) || appReminderTaskIdFromCardTaskId(normalizeText(input.cardTaskId));
+    const key = `${taskId}|${normalizeText(input.responseAt)}`;
+    if (requesterFeedbackSyncInFlight.has(key)) return requesterFeedbackSyncInFlight.get(key);
+    const pending = performRequesterFeedbackCardSync(input);
+    requesterFeedbackSyncInFlight.set(key, pending);
+    try { return await pending; }
+    finally { requesterFeedbackSyncInFlight.delete(key); }
+  }
+
+  async function performRequesterFeedbackCardSync(input = {}) {
     const cardTaskId = normalizeText(input.cardTaskId);
     const feedbackCardTaskId = normalizeText(input.feedbackCardTaskId) || cardTaskId;
     const id = normalizeText(input.taskId) || appReminderTaskIdFromCardTaskId(cardTaskId);
@@ -3233,6 +3285,11 @@ function createWatchdogModule(options = {}) {
     ));
     if (!feedbackRecorded) {
       return { ok: false, skipped: true, reason: "feedback_not_recorded" };
+    }
+    const deliveredMessageId = mergedRequesterFeedbackMessageId(task, responseAt);
+    if (deliveredMessageId) {
+      await recallSupersededRequesterFeedback(task, responseAt, deliveredMessageId);
+      return { ok: true, duplicate: true, replacementMessageId: deliveredMessageId };
     }
     const record = requesterFeedbackMergeRecordForCard(task, cardTaskId);
     if (!record) {
@@ -3330,6 +3387,13 @@ function createWatchdogModule(options = {}) {
       record.feedbackSyncResponseAt = responseAt;
       record.feedbackSyncedAt = syncedAt;
       record.feedbackReplacementMessageId = result.msgid || "";
+      task.appRequesterFeedbackDeliveredResponseAt = responseAt;
+      task.appRequesterFeedbackDeliveredMessageId = result.msgid;
+      if (task.pendingAppResultNotice?.responseAt === responseAt) {
+        task.pendingAppResultNotice = null;
+        task.appResultNoticeRetryAt = "";
+        task.appResultNoticeLastError = "";
+      }
       rememberAppPushMessage(task, {
         msgid: result.msgid || "",
         sentAt: syncedAt,
@@ -3341,42 +3405,7 @@ function createWatchdogModule(options = {}) {
         readState: "feedback",
         replacesMessageId: record.msgid
       });
-      const separateNoticeMessageId = normalizeText(task.appResultNoticeMessageId);
-      const separateNoticeMatches = separateNoticeMessageId
-        && normalizeText(task.appResultNoticeResponseAt) === responseAt
-        && !normalizeText(task.appResultNoticeRecalledAt);
-      if (separateNoticeMatches) {
-        try {
-          const separateRecall = await appNotifier.recallMessage({
-            msgid: separateNoticeMessageId,
-            purpose: "watchdog_requester_feedback_separate_notice_cleanup"
-          });
-          if (!separateRecall || !separateRecall.ok) {
-            throw new Error((separateRecall && separateRecall.reason) || "企业微信独立盯梢反馈卡撤回失败");
-          }
-          task.appResultNoticeRecalledAt = new Date().toISOString();
-          task.appResultNoticeRecallLastError = "";
-          if (logger && typeof logger.info === "function") {
-            logger.info("Watchdog superseded separate requester feedback card recalled", {
-              taskId: task.id,
-              responseAt,
-              messageIdConfigured: true
-            });
-          }
-        } catch (error) {
-          const info = errorInfo(error, "独立盯梢反馈卡撤回失败");
-          task.appResultNoticeRecallLastError = info.message;
-          if (logger && typeof logger.warn === "function") {
-            logger.warn("Watchdog superseded separate requester feedback card recall failed", {
-              taskId: task.id,
-              responseAt,
-              errcode: info.errcode,
-              errmsg: info.errmsg,
-              message: info.message
-            });
-          }
-        }
-      }
+      await recallSupersededRequesterFeedback(task, responseAt, result.msgid);
       task.appRequesterLastCardTaskId = replacementCard.task_id;
       task.appRequesterLastMessageId = result.msgid || "";
       task.appRequesterLastSentAt = syncedAt;
@@ -3959,13 +3988,30 @@ function createWatchdogModule(options = {}) {
     }
     const note = normalizeText(options.note);
     const responseAt = options.responseAt || new Date().toISOString();
+    const mergedMessageId = mergedRequesterFeedbackMessageId(task, responseAt);
+    if (mergedMessageId || task.appResultNoticeResponseAt === responseAt) {
+      logger?.info?.("Watchdog duplicate result notice suppressed", {
+        taskId: task.id, responseAt, delivery: mergedMessageId ? "merged_card" : "separate_notice"
+      });
+      return { ok: true, duplicate: true, channel: mergedMessageId ? "wecom-app-merged" : "wecom-app",
+        msgid: mergedMessageId || task.appResultNoticeMessageId || "" };
+    }
     const useTemplateCard = appPushNativeCardReady();
     const mirror = useTemplateCard && !options.forceSeparate
       ? activeRequesterMirrorRecordForCard(task, options.assigneeCardTaskId)
       : null;
     if (mirror) {
+      const response = (task.responses || []).find((item) => item.receivedAt === responseAt);
+      if (response) {
+        task.pendingRequesterFeedbackCardSync = {
+          cardTaskId: normalizeText(options.assigneeCardTaskId),
+          feedbackCardTaskId: normalizeText(response.cardTaskId), label, note, responseAt
+        };
+        task.requesterFeedbackCardSyncRetryAt = "";
+        save();
+      }
       if (logger && typeof logger.info === "function") {
-        logger.info("Watchdog app result notice merged into requester card", {
+        logger.info("Watchdog app result notice delegated to requester card merge", {
           taskId: task.id,
           assigneeCardTaskId: normalizeText(options.assigneeCardTaskId),
           requesterCardTaskId: normalizeText(mirror.cardTaskId),
@@ -3994,6 +4040,8 @@ function createWatchdogModule(options = {}) {
       task.appResultNoticeSentAt = sentAt;
       task.appResultNoticeMessageId = result.msgid || "";
       task.appResultNoticeResponseAt = responseAt;
+      task.appResultNoticeRecalledAt = "";
+      task.appResultNoticeRecallLastError = "";
       task.appResultNoticeLastError = "";
       task.appResultNoticeRetryAt = "";
       task.pendingAppResultNotice = null;
@@ -4071,7 +4119,14 @@ function createWatchdogModule(options = {}) {
   }
 
   function pendingAppResultNoticeForTask(task, nowMs) {
-    const pending = task.pendingAppResultNotice;
+    let pending = task.pendingAppResultNotice;
+    if (pending && (mergedRequesterFeedbackMessageId(task, pending.responseAt)
+      || task.appResultNoticeResponseAt === pending.responseAt)) pending = null;
+    const response = pending && pending.label ? pending : latestAppResultResponse(task);
+    const responseAt = normalizeText(response && (response.responseAt || response.receivedAt));
+    if (responseAt && (mergedRequesterFeedbackMessageId(task, responseAt)
+      || task.appResultNoticeResponseAt === responseAt
+      || task.pendingRequesterFeedbackCardSync?.responseAt === responseAt)) return null;
     if (pending && pending.label) {
       const retryAtMs = dateValueMs(task.appResultNoticeRetryAt);
       if (!retryAtMs || retryAtMs <= nowMs) {
