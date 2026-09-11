@@ -3227,13 +3227,19 @@ function createWatchdogModule(options = {}) {
     return normalizeText(record && record.feedbackReplacementMessageId);
   }
 
+  function currentAppResultNoticeIsRecalled(task) {
+    const recalledAt = dateValueMs(task.appResultNoticeRecalledAt);
+    const sentAt = dateValueMs(task.appResultNoticeSentAt);
+    return Boolean(recalledAt && (!sentAt || recalledAt >= sentAt));
+  }
+
   async function recallSupersededRequesterFeedback(task, responseAt, replacementMessageId) {
     const separateId = normalizeText(task.appResultNoticeMessageId);
     const activeReplacement = (task.appPushMessages || []).some((item) => (
       item.targetRole === "requester" && item.msgid === replacementMessageId && !item.recalledAt
     ));
     if (!activeReplacement || !separateId || separateId === replacementMessageId
-      || task.appResultNoticeResponseAt !== responseAt || task.appResultNoticeRecalledAt) return;
+      || task.appResultNoticeResponseAt !== responseAt || currentAppResultNoticeIsRecalled(task)) return;
     const sentAt = dateValueMs(task.appResultNoticeSentAt);
     if (!sentAt || Date.now() - sentAt > WECOM_APP_MESSAGE_RECALL_WINDOW_MS) return;
     try {
@@ -3500,7 +3506,7 @@ function createWatchdogModule(options = {}) {
       !task
       || task.status !== "active"
       || !normalizeText(task.appResultNoticeMessageId)
-      || normalizeText(task.appResultNoticeRecalledAt)
+      || currentAppResultNoticeIsRecalled(task)
       || !responseAtMs
       || !noticeSentAtMs
       || nowMs - noticeSentAtMs > WECOM_APP_MESSAGE_RECALL_WINDOW_MS

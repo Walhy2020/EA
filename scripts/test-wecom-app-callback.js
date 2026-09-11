@@ -963,7 +963,7 @@ async function main() {
     historicalTask.appResultNoticeResponseAt = historicalTask.responses[0].receivedAt;
     historicalTask.appResultNoticeSentAt = new Date().toISOString();
     historicalTask.appResultNoticeMessageId = "late-duplicate-feedback";
-    historicalTask.appResultNoticeRecalledAt = "";
+    historicalTask.appResultNoticeRecalledAt = "2020-09-03T10:26:08.780Z";
     historicalTask.pendingAppResultNotice = {
       label: "正常推进", note: "stale retry", responseAt: historicalTask.responses[0].receivedAt
     };
