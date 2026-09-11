@@ -8,6 +8,8 @@ const {
 
 const workflowRules = {
   roles: {
+    UI人员: { leaderField: "UI组长", leaderNames: ["王谦", "王谦"] },
+    动效人员: { leaderField: "动效组长", leaderNames: ["刘晓明"] },
     策划人员: {
       leaderField: "策划组长",
       leaderNames: ["时振兴"],
@@ -36,8 +38,9 @@ const workflowRules = {
 
 assert.deepStrictEqual(
   fallbackLeaderFilters(workflowRules).map((item) => `${item.role}:${item.name}`),
-  ["策划:时振兴", "前端:胡锦南", "前端:赵琛", "后端:王文静", "测试:高文盛"]
+  ["策划:时振兴", "前端:胡锦南", "前端:赵琛", "后端:王文静", "测试:高文盛", "UI:王谦", "动效:刘晓明"]
 );
+assert.deepStrictEqual(fallbackLeaderFilters({}), []);
 
 assert.deepStrictEqual(
   relatedLeaderNames({ owners: { frontend: "前端乙" } }, "", workflowRules),

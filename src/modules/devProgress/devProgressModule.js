@@ -31,7 +31,7 @@ const SCAN_PAGE_CONCURRENCY = 2;
 const FULL_SCAN_REUSE_MS = 30 * 1000;
 const RECENT_TASK_TTL_MS = 30 * 60 * 1000;
 const RECENT_TASK_LIMIT_PER_USER = 20;
-const DEV_PROGRESS_MODULE_VERSION = "0.3.8";
+const DEV_PROGRESS_MODULE_VERSION = "0.3.9";
 const H5_MONITOR_CACHE_VERSION = 24;
 const H5_MONITOR_CACHE_RELATIVE_PATH = "data/dev-progress/h5-monitor-cache.json";
 const REQUIRED_FIELD_FALLBACK_VIEWER_NAMES = ["李晶晶"];
@@ -3547,6 +3547,9 @@ function createDevProgressModule(options = {}) {
     const items = fallbackOnly
       ? [...fallbackLeaderItems, ...fallbackResidualItems]
       : mergeRequiredFieldViewItems([...directOwnerItems, ...leaderItems, ...memberView.views.flatMap((view) => view.items)]);
+    const currentLeaderFilters = fallbackOnly
+      ? fallbackLeaderFilters(monitorWorkflowRules(settings, workflowRulesProvider().normalizedRules))
+      : [];
 
     if (logger && typeof logger.info === "function") {
       const isFallbackOwner = requiredFieldFallbackOwners(settings).some((fallbackOwner) => personNameMatches(
@@ -3569,9 +3572,8 @@ function createDevProgressModule(options = {}) {
         fallbackOwnerRoleSeparated: !fallbackOnly && isFallbackOwner,
         fallbackViewer: fallbackOnly && canReadFallbackScope,
         fallbackViewerCount: fallbackOnly ? requiredFieldFallbackViewerNames(settings).length : 0,
-        fallbackLeaderFilterCount: fallbackOnly && Array.isArray(cache.fallbackLeaderFilters)
-          ? cache.fallbackLeaderFilters.length
-          : 0,
+        fallbackLeaderFilterCount: currentLeaderFilters.length,
+        fallbackLeaderFilterSource: fallbackOnly ? "current_workflow_roles" : "none",
         fallbackLeaderScopedItemCount: fallbackLeaderItems.length,
         fallbackResidualItemCount: fallbackResidualItems.length,
         visibilitySource: fallbackOnly ? "requiredFieldLeaderViewItems+fallbackResidual" : "direct+leader+memberDirect"
@@ -3590,9 +3592,7 @@ function createDevProgressModule(options = {}) {
       isLeader: memberView.isLeader,
       selfItems: sortH5TaskItems(directOwnerItems),
       memberViews: memberView.views,
-      leaderFilters: fallbackOnly && Array.isArray(cache.fallbackLeaderFilters)
-        ? cache.fallbackLeaderFilters
-        : [],
+      leaderFilters: currentLeaderFilters,
       cache: cache.cacheMeta || h5CacheMeta(cache),
       read: cache.read || null,
       generatedAt: cache.generatedAt || new Date().toISOString()

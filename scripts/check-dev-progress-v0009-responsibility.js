@@ -103,12 +103,18 @@ async function main() {
   assert.deepStrictEqual(liu.items.map((item) => item.demandId), ["fallback-own"]);
   assert(!liu.isLeader);
   assert.deepStrictEqual(liu.memberViews, []);
+  // Filter options must not depend on a cache created before UI/animation were included.
+  workflow.roles.UI人员 = { leaderField: "UI组长", leaderNames: ["王谦"] };
+  workflow.roles.动效人员 = { leaderField: "动效组长", leaderNames: ["刘晓明"] };
+  assert(!persisted.fallbackLeaderFilters.some((item) => item.name === "刘晓明"));
   for (const name of required.fallbackOwners) {
     const fallback = await module.listRequiredFieldItems({ userName: name, scope: "fallback" });
     assert.strictEqual(new Set(fallback.items.map((item) => item.demandId)).size, records.length);
     assert.deepStrictEqual(filter.visibleItems(fallback.items, ["李东"]).map((item) => item.demandId).sort(),
       liLeader.map((item) => item.demandId).sort());
     assert(fallback.leaderFilters.some((item) => item.name === "李东"));
+    assert(fallback.leaderFilters.some((item) => item.name === "刘晓明" && item.role === "动效"));
+    assert(fallback.leaderFilters.some((item) => item.name === "王谦" && item.role === "UI"));
     assert(!fallback.leaderFilters.some((item) => item.name === "旧组长"));
   }
   const memberTasks = await module.listMemberTaskItems({ userName: "李东" });

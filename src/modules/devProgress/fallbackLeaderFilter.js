@@ -1,7 +1,6 @@
 "use strict";
 
-// The fallback view is intentionally limited to the roles that own its triage flow.
-// Names always come from the current workflow configuration, never from the H5 page.
+// Preserve the legacy relationship matcher separately from the complete filter list.
 const FALLBACK_LEADER_ROLE_ORDER = [
   { assigneeField: "策划人员", label: "策划" },
   { assigneeField: "前端开发", label: "前端" },
@@ -42,7 +41,11 @@ function namesInclude(values = [], name) {
 function fallbackLeaderFilters(workflowRules = {}) {
   const roles = workflowRules.roles && typeof workflowRules.roles === "object" ? workflowRules.roles : {};
   const result = [];
-  for (const definition of FALLBACK_LEADER_ROLE_ORDER) {
+  for (const definition of [
+    ...FALLBACK_LEADER_ROLE_ORDER,
+    { assigneeField: "UI人员", label: "UI" },
+    { assigneeField: "动效人员", label: "动效" }
+  ]) {
     const role = roles[definition.assigneeField] || {};
     const leaderField = String(role.leaderField || "").trim();
     for (const name of uniqueNames(role.leaderNames)) {
