@@ -301,6 +301,22 @@ async function main() {
       return request(port, "POST", callbackUrl(encrypted), body);
     }
 
+    const keepCardTaskId = "ea_watch_control_wd_receipt_99";
+    const keepSchedule = taskById(storeFile, "wd_receipt").nextRunAt;
+    await sendEvent({ taskId: keepCardTaskId, eventKey: "ea_watch_control_cancel", userId: "requester" });
+    assert.equal(cardUpdates.at(-1).templateCard.main_title.title, "确认取消盯梢？");
+    await sendEvent({ taskId: keepCardTaskId, eventKey: "ea_watch_control_keep", userId: "requester" });
+    const keepCard = cardUpdates.at(-1).templateCard;
+    assert.equal(keepCard.main_title.title, "隔离回调测试任务-wd_receipt");
+    assert.equal(keepCard.sub_title_text, "备注：收到前备注");
+    assert.equal(keepCard.source.desc_color, 1);
+    assert(keepCard.horizontal_content_list.some((item) => item.keyname === "详情" && item.value === "历史"));
+    assert.equal(keepCard.button_list[0].key, "ea_watch_control_cancel");
+    assert.equal(keepCard.task_id, keepCardTaskId);
+    assert.equal(taskById(storeFile, "wd_receipt").nextRunAt, keepSchedule);
+    assert.equal(taskById(storeFile, "wd_receipt").status, "active");
+    assert.equal(callbackAppMessages.length, 0, "dismissing cancel must only update the existing card");
+
     const denied = await sendEvent({ taskId: "ea_watch_wd_active_1", eventKey: "ea_watch_progress", userId: "other-user" });
     assert.equal(denied.statusCode, 200);
     assert.equal(taskById(storeFile, "wd_active").responses.length, 0);
@@ -620,6 +636,23 @@ async function main() {
     assert.equal(linkedDetail.url.includes("legacy-feedback-token"), false);
     assert.equal(linkedCard.horizontal_content_list.some((item) => item.keyname === "当前情况说明"), false);
     const requesterNewMessage = linkedMessages[1];
+    async function assertCancelRoundTrip(message) {
+      const card = message.templateCard;
+      const before = taskById(linkedReminderStoreFile, "wd_linked_reminder");
+      const sender = { userId: "requester", source: "wecom-app-native" };
+      const confirm = await linkedReminderWatchdog.handleTemplateCardEvent({ taskId: card.task_id, eventKey: "ea_watch_control_cancel" }, sender);
+      assert.equal(confirm.updateCard.main_title.title, "确认取消盯梢？");
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await linkedReminderWatchdog.handleTemplateCardEvent({ taskId: card.task_id, eventKey: "ea_watch_control_keep" }, sender);
+        const restored = result.updateCard;
+        const visual = (value) => JSON.parse(JSON.stringify(value, (key, item) => key === "url" ? "<url>" : item));
+        assert.deepEqual(visual(restored), visual(card), "keep must restore all visible fields and read state");
+        assert(restored.horizontal_content_list.find((item) => item.keyname === "详情").url);
+      }
+      const after = taskById(linkedReminderStoreFile, "wd_linked_reminder");
+      for (const field of ["status", "nextRunAt", "reminderCount", "responses"]) assert.deepEqual(after[field], before[field]);
+    }
+    await assertCancelRoundTrip(requesterNewMessage);
     assert.equal(requesterNewMessage.targetUserId, "requester");
     assert.equal(requesterNewMessage.purpose, "watchdog_requester_status_new");
     assert.equal(requesterNewMessage.templateCard.source.desc, "NEW · EA盯梢");
@@ -659,6 +692,7 @@ async function main() {
     assert.equal(requesterSyncResult.ok, true);
     assert.deepEqual(linkedRecalledMessageIds, ["linked-2"]);
     const requesterReadMessage = linkedMessages[2];
+    await assertCancelRoundTrip(requesterReadMessage);
     assert.equal(requesterReadMessage.targetUserId, "requester");
     assert.equal(requesterReadMessage.purpose, "watchdog_requester_status_received");
     assert.equal(requesterReadMessage.templateCard.source.desc, "EA盯梢");
@@ -701,6 +735,36 @@ async function main() {
     assert.equal(requesterFeedbackSyncResult.ok, true);
     assert.deepEqual(linkedRecalledMessageIds, ["linked-2", "linked-3"]);
     const requesterFeedbackMessage = linkedMessages[3];
+    await assertCancelRoundTrip(requesterFeedbackMessage);
+    for (const [originalTask, originalCard] of [
+      [linkedTaskAfterSend, requesterNewMessage.templateCard],
+      [linkedTaskAfterSync, requesterReadMessage.templateCard],
+      [taskById(linkedReminderStoreFile, "wd_linked_reminder"), requesterFeedbackMessage.templateCard]
+    ]) {
+      for (const legacy of [false, true]) {
+        const restoredTask = JSON.parse(JSON.stringify(originalTask));
+        if (legacy) for (const record of restoredTask.appPushMessages) delete record.templateCardSnapshot;
+        restoredTask.responses.push({ receivedAt: "2099-01-01T00:00:00.000Z", label: "不能混入旧卡的新反馈", note: "未来反馈" });
+        const restoreFile = path.join(directory, "keep-restart.json");
+        fs.writeFileSync(restoreFile, JSON.stringify({ tasks: [restoredTask], drafts: [] }));
+        const restarted = createWatchdogModule({ storeFile: restoreFile,
+          moduleConfig: { enabled: true }, appFeedbackUrl: "https://ea.example.com/watchdog-feedback.html",
+          logger: { info() {}, warn() {} } });
+        const event = { taskId: originalCard.task_id, eventKey: "ea_watch_control_keep" };
+        const deniedKeep = await restarted.handleTemplateCardEvent(event, { userId: "assignee", source: "wecom-app-native" });
+        assert.equal(deniedKeep.updateCard.main_title.title, "不能取消盯梢");
+        const restored = await restarted.handleTemplateCardEvent(event, { userId: "requester", source: "wecom-app-native" });
+        for (const field of ["source", "main_title", "sub_title_text", "button_list", "task_id"]) {
+          assert.deepEqual(restored.updateCard[field], originalCard[field], `${field}: legacy=${legacy}`);
+        }
+        assert.equal(taskById(restoreFile, restoredTask.id).nextRunAt, originalTask.nextRunAt);
+      }
+    }
+    const terminalKeep = await watchdog.handleTemplateCardEvent({
+      taskId: "ea_watch_control_wd_completed_99", eventKey: "ea_watch_control_keep"
+    }, { userId: "requester", source: "wecom-app-native" });
+    assert.equal(terminalKeep.updateCard.main_title.title, "盯梢已完成");
+    assert.equal(taskById(storeFile, "wd_completed").status, "completed");
     assert.equal(requesterFeedbackMessage.targetUserId, "requester");
     assert.equal(requesterFeedbackMessage.purpose, "watchdog_requester_feedback_merged");
     assert.equal(requesterFeedbackMessage.templateCard.source.desc, "EA盯梢");

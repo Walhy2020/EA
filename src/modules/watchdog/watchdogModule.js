@@ -2959,6 +2959,9 @@ function createWatchdogModule(options = {}) {
       readState: normalizeText(message.readState),
       replacesMessageId: normalizeText(message.replacesMessageId)
     };
+    if (message.targetRole === "requester" && message.templateCard) {
+      next.templateCardSnapshot = JSON.parse(JSON.stringify(message.templateCard));
+    }
     if (existing) {
       Object.assign(existing, next);
     } else {
@@ -3154,6 +3157,7 @@ function createWatchdogModule(options = {}) {
         cardTaskId: replacementCard.task_id,
         linkedCardTaskId: cardTaskId,
         readState: "received",
+        templateCard: replacementCard,
         replacesMessageId: record.msgid
       });
       task.appRequesterReceiptSyncLastError = "";
@@ -3409,6 +3413,7 @@ function createWatchdogModule(options = {}) {
         cardTaskId: replacementCard.task_id,
         linkedCardTaskId: cardTaskId,
         readState: "feedback",
+        templateCard: replacementCard,
         replacesMessageId: record.msgid
       });
       await recallSupersededRequesterFeedback(task, responseAt, result.msgid);
@@ -3697,7 +3702,8 @@ function createWatchdogModule(options = {}) {
         targetRole: "requester",
         cardTaskId: card.task_id,
         linkedCardTaskId: assigneeCardTaskId,
-        readState: "new"
+        readState: "new",
+        templateCard: card
       });
       task.appRequesterLastCardTaskId = card.task_id;
       task.appRequesterLastMessageId = result.msgid || "";
@@ -6321,6 +6327,39 @@ function createWatchdogModule(options = {}) {
     ));
   }
 
+  function restoreControlCard(task, cardTaskId, sender) {
+    const record = (task.appPushMessages || []).find((item) => (
+      item.targetRole === "requester" && item.cardTaskId === cardTaskId
+    ));
+    if (record?.templateCardSnapshot?.task_id === cardTaskId) {
+      const card = JSON.parse(JSON.stringify(record.templateCardSnapshot));
+      const feedbackUrl = appFeedbackUrlForTask(task);
+      if (feedbackUrl) {
+        card.card_action = { type: 1, url: feedbackUrl };
+        for (const item of card.horizontal_content_list || []) {
+          if (item.keyname === "详情" && item.type === 1) item.url = feedbackUrl;
+        }
+      }
+      return card;
+    }
+    if (record || sender.source === "wecom-app-native") {
+      // Older deliveries have no snapshot; rebuild using that card's state and feedback time.
+      const feedback = record?.readState === "feedback"
+        ? (task.responses || []).filter((item) => (
+          dateValueMs(item.receivedAt) <= dateValueMs(record.sentAt)
+        )).sort((a, b) => dateValueMs(b.receivedAt) - dateValueMs(a.receivedAt))[0]
+        : null;
+      return appRequesterReminderCard(task, record?.tipType || "watchdog_progress", {
+        cardTaskId,
+        received: record?.readState !== "new",
+        feedbackLabel: feedback?.label,
+        feedbackNote: feedback?.note,
+        feedbackAt: feedback?.receivedAt
+      });
+    }
+    return createControlCard(task, cardTaskId);
+  }
+
   async function handleControlCardEvent(summary, sender) {
     const id = parseWatchdogControlCardTaskId(summary.taskId);
     const task = findTask(id);
@@ -6369,11 +6408,22 @@ function createWatchdogModule(options = {}) {
     }
 
     if (summary.eventKey === "ea_watch_control_keep") {
+      const restoredCard = restoreControlCard(task, summary.taskId, sender);
       save();
+      if (logger && typeof logger.info === "function") {
+        logger.info("Watchdog cancel dismissed, original control card update prepared", {
+          taskId: task.id,
+          cardTaskId: summary.taskId,
+          status: task.status,
+          nextRunAt: task.nextRunAt || "",
+          source: sender.source || "wecom-smart-bot",
+          hasDetails: restoredCard.horizontal_content_list.some((item) => item.keyname === "详情")
+        });
+      }
       return {
         handled: true,
         task,
-        updateCard: controlCardUpdate("继续盯梢", "已保留这条盯梢任务，后续会按原频率继续。", 3)
+        updateCard: restoredCard
       };
     }
 
