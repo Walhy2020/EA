@@ -4,6 +4,8 @@ const fs = require("fs");
 const https = require("https");
 const path = require("path");
 const { projectRoot } = require("../../utils/paths");
+const { createOrdinarySheetImporter } = require("./ordinarySheetImport");
+const { LIMITS } = require("./excelContent");
 
 const registryDir = path.join(projectRoot, "data", "doc-creator");
 const registryFile = path.join(registryDir, "created-docs.jsonl");
@@ -27,7 +29,7 @@ const DOC_KIND_SPECS = {
   },
   spreadsheet: {
     action: "create_spreadsheet",
-    displayName: "表格",
+    displayName: "普通表格",
     defaultPrefix: "EA表格",
     prefixKey: "spreadsheetNamePrefix",
     docType: 4,
@@ -54,7 +56,13 @@ function requestJson(method, url, payload) {
       }
     }, (response) => {
       const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
+      let length = 0;
+      response.on("error", reject);
+      response.on("data", (chunk) => {
+        length += chunk.length;
+        if (length > 8 * 1024 * 1024) request.destroy(new Error("企业微信响应超出大小限制。"));
+        else chunks.push(chunk);
+      });
       response.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
         try {
@@ -66,6 +74,8 @@ function requestJson(method, url, payload) {
     });
 
     request.on("error", reject);
+    const deadline = setTimeout(() => request.destroy(new Error("企业微信文档接口请求超时。")), 30000);
+    request.on("close", () => clearTimeout(deadline));
     if (body) {
       request.write(body);
     }
@@ -147,7 +157,7 @@ function docKindSpec(config, kind) {
   return {
     ...spec,
     kind: normalizedKind,
-    docType: Number.isFinite(configuredDocType) && configuredDocType > 0 ? configuredDocType : spec.docType,
+    docType: normalizedKind === "spreadsheet" ? 4 : Number.isFinite(configuredDocType) && configuredDocType > 0 ? configuredDocType : spec.docType,
     prefix: configuredPrefix || spec.defaultPrefix
   };
 }
@@ -218,8 +228,8 @@ function documentAdminUsers(config, input = {}) {
   ]);
 }
 
-async function getSheets(docid, accessToken) {
-  const data = await postWeDoc("smartsheet/get_sheet", accessToken, { docid });
+async function getSheets(docid, accessToken, post = postWeDoc) {
+  const data = await post("smartsheet/get_sheet", accessToken, { docid });
   const sheetList = Array.isArray(data.sheet_list)
     ? data.sheet_list.map((sheet) => ({
       sheetId: sheet.sheet_id || sheet.sheetId || sheet.id || "",
@@ -246,7 +256,8 @@ function createdDocText(spec, visibleUrl) {
   ].join("\n");
 }
 
-async function createDocument(config, input = {}, kind = "smartsheet", logger = console) {
+async function createDocument(config, input = {}, kind = "smartsheet", logger = console, services = {}) {
+  const post = services.post || postWeDoc;
   const spec = docKindSpec(config, kind);
   if (!config.enabled) {
     return {
@@ -272,9 +283,9 @@ async function createDocument(config, input = {}, kind = "smartsheet", logger = 
     spec.prefix,
     { stripTypeSuffix: !hasExplicitDocName }
   );
-  const accessToken = await getAccessToken(config);
+  const accessToken = await (services.token || getAccessToken)(config);
   const payload = {
-    doc_type: spec.docType,
+    doc_type: kind === "spreadsheet" ? 4 : spec.docType,
     doc_name: docName
   };
   if (config.createDoc.spaceId) {
@@ -300,7 +311,7 @@ async function createDocument(config, input = {}, kind = "smartsheet", logger = 
     adminUserCount: adminUsers.length
   });
 
-  const created = await postWeDoc("create_doc", accessToken, payload);
+  const created = await post("create_doc", accessToken, payload);
   if (created.errcode !== 0 || !created.docid) {
     logger.warn("WeDoc create_doc failed", {
       module: "docCreator",
@@ -321,12 +332,13 @@ async function createDocument(config, input = {}, kind = "smartsheet", logger = 
     };
   }
 
+  if (services.onCreated) services.onCreated(created);
   const normalizedSheets = spec.needsSheetInfo
-    ? await getSheets(created.docid, accessToken)
+    ? await getSheets(created.docid, accessToken, post)
     : { ok: true, errcode: 0, errmsg: "skipped", sheetList: [] };
   const smartSheet = spec.needsSheetInfo ? firstSmartSheet(normalizedSheets.sheetList) : null;
   const share = config.createDoc.shareAfterCreate
-    ? await postWeDoc("doc_share", accessToken, { docid: created.docid })
+    ? await post("doc_share", accessToken, { docid: created.docid }).catch(() => ({ errcode: -1, errmsg: "share unavailable" }))
     : { errcode: 0, errmsg: "share skipped", share_url: "" };
   const docUrlParts = parseDocUrlParts(created.url);
   const shareUrlParts = parseDocUrlParts(share.share_url);
@@ -334,7 +346,7 @@ async function createDocument(config, input = {}, kind = "smartsheet", logger = 
   const sheetId = docUrlParts.sheetId || shareUrlParts.sheetId || (smartSheet && smartSheet.sheetId) || "";
   const viewId = docUrlParts.viewId || shareUrlParts.viewId || "";
   const createdAt = new Date().toISOString();
-  appendCreatedDoc({
+  (services.append || appendCreatedDoc)({
     createdAt,
     kind: spec.kind,
     docType: payload.doc_type,
@@ -418,6 +430,16 @@ async function createSpreadsheet(config, input = {}, logger = console) {
 function createDocCreatorModule(options = {}) {
   const config = defaultConfig(options.moduleConfig || {});
   const logger = options.logger || console;
+  const services = options.services || {};
+  const importer = createOrdinarySheetImporter({
+    directory: options.importDirectory || path.join(registryDir, "imports"),
+    logger,
+    createSpreadsheet: (input, onCreated) => createDocument(config, input, "spreadsheet", logger, { ...services, onCreated }),
+    api: async () => {
+      const token = await (services.token || getAccessToken)(config);
+      return (endpoint, payload) => (services.post || postWeDoc)(endpoint, token, payload);
+    }
+  });
 
   async function handle(context = {}) {
     const task = context.route && context.route.task ? context.route.task : {};
@@ -435,7 +457,7 @@ function createDocCreatorModule(options = {}) {
       return createSmartDocument(config, input, logger);
     }
     if (action === "create_spreadsheet") {
-      return createSpreadsheet(config, input, logger);
+      return createDocument(config, input, "spreadsheet", logger, services);
     }
     return createSmartSheet(config, input, logger);
   }
@@ -447,6 +469,9 @@ function createDocCreatorModule(options = {}) {
       ready: missing.length === 0,
       missing,
       registryFile,
+      ordinarySpreadsheetImport: { enabled: Boolean(config.enabled) && missing.length === 0,
+        formats: ["xlsx", "xls"], contentMode: "display_text", maxFileBytes: LIMITS.bytes,
+        maxSheets: LIMITS.sheets, maxCellsPerSheet: LIMITS.cellsPerSheet },
       docTypes: Object.fromEntries(Object.keys(DOC_KIND_SPECS).map((kind) => {
         const spec = docKindSpec(config, kind);
         return [kind, spec.docType];
@@ -460,7 +485,11 @@ function createDocCreatorModule(options = {}) {
     createDocument: (input = {}) => createNormalDocument(config, input, logger),
     createSmartDocument: (input = {}) => createSmartDocument(config, input, logger),
     createSmartSheet: (input = {}) => createSmartSheet(config, input, logger),
-    createSpreadsheet: (input = {}) => createSpreadsheet(config, input, logger),
+    createSpreadsheet: (input = {}) => createDocument(config, input, "spreadsheet", logger, services),
+    importExcel: (input = {}) => {
+      if (!config.enabled || missingCreateRequired(config).length) return Promise.resolve({ ok: false, text: "普通表格转换未启用或缺少企业微信文档配置，请联系管理员。" });
+      return importer.importExcel(input);
+    },
     getStatus
   };
 }

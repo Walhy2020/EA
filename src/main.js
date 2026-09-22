@@ -143,7 +143,8 @@ function buildRuntime(config, logger) {
     logger,
     diagnostics: robotDiagnostics,
     watchdog: modules.watchdog,
-    desktopTip: modules.desktopTip
+    desktopTip: modules.desktopTip,
+    docCreator: modules.docCreator
   });
   modules.watchdog.setRobotServer(robotServer);
 

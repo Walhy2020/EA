@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { normalizeRobotMessage } = require("./messageNormalizer");
 const { errorInfo } = require("../utils/errorInfo");
+const { createExcelBotImport } = require("../modules/docCreator/excelBotImport");
 
 function errorMessage(error) {
   return error && error.message ? error.message : String(error || "");
@@ -613,6 +614,7 @@ function createWecomBotServer(options) {
   const diagnostics = options.diagnostics;
   const watchdog = options.watchdog;
   const desktopTip = options.desktopTip;
+  const excelImport = createExcelBotImport({ docCreator: options.docCreator });
   let monitorManager = options.monitorManager || null;
   const sdkSearchDirs = options.sdkSearchDirs || [];
   let wsClient = null;
@@ -702,6 +704,30 @@ function createWecomBotServer(options) {
       processingText: stream.processingText || processingReplyText,
       processingAck: stream.ack
     };
+  }
+
+  async function handleExcelImport(frame, sender, text, isFile = false) {
+    const captured = excelImport.capture({ frame, sender, text, isFile });
+    if (!captured) return false;
+    if (captured.duplicate) return true;
+    if (!captured.run) {
+      await replyText(frame, captured.text);
+      return true;
+    }
+    let stream;
+    try {
+      stream = await startReplyStream(frame, "正在读取 Excel 并转换普通表格，请稍等...");
+    } catch (_) {
+      logger.warn("WeDoc Excel progress reply unavailable");
+    }
+    const result = await captured.run();
+    try {
+      await finishReplyStream(frame, stream, result.text);
+    } catch (_) {
+      logger.warn("WeDoc Excel result stream failed; trying proactive reply", { ok: result.ok });
+      await sendMarkdownMessage(sender.chatType === "group" ? sender.chatId : sender.userId, result.text);
+    }
+    return true;
   }
 
   async function sendMarkdownMessage(targetId, content, options = {}) {
@@ -1132,6 +1158,7 @@ function createWecomBotServer(options) {
       });
       let processingReply = null;
       try {
+        if (await handleExcelImport(frame, sender, content)) return;
         if (desktopTip && typeof desktopTip.captureWecomGroupBindingMessage === "function") {
           const desktopTipGroupResult = await desktopTip.captureWecomGroupBindingMessage({
             text: content,
@@ -1310,6 +1337,15 @@ function createWecomBotServer(options) {
             }
           }
         });
+      }
+    });
+
+    wsClient.on("message.file", async (frame) => {
+      try {
+        await handleExcelImport(frame, senderFromFrame(frame), "", true);
+      } catch (_) {
+        logger.error("WeDoc Excel file callback failed");
+        try { await replyText(frame, "文件转换处理失败，请稍后重新发送文件；如已创建表格，请先检查结果。"); } catch (_) {}
       }
     });
 
