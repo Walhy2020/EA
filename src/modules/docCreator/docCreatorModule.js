@@ -4,8 +4,7 @@ const fs = require("fs");
 const https = require("https");
 const path = require("path");
 const { projectRoot } = require("../../utils/paths");
-const { createOrdinarySheetImporter } = require("./ordinarySheetImport");
-const { LIMITS } = require("./excelContent");
+const { EXCEL_IMPORT_UNSUPPORTED } = require("./excelBotImport");
 
 const registryDir = path.join(projectRoot, "data", "doc-creator");
 const registryFile = path.join(registryDir, "created-docs.jsonl");
@@ -431,15 +430,6 @@ function createDocCreatorModule(options = {}) {
   const config = defaultConfig(options.moduleConfig || {});
   const logger = options.logger || console;
   const services = options.services || {};
-  const importer = createOrdinarySheetImporter({
-    directory: options.importDirectory || path.join(registryDir, "imports"),
-    logger,
-    createSpreadsheet: (input, onCreated) => createDocument(config, input, "spreadsheet", logger, { ...services, onCreated }),
-    api: async () => {
-      const token = await (services.token || getAccessToken)(config);
-      return (endpoint, payload) => (services.post || postWeDoc)(endpoint, token, payload);
-    }
-  });
 
   async function handle(context = {}) {
     const task = context.route && context.route.task ? context.route.task : {};
@@ -469,9 +459,7 @@ function createDocCreatorModule(options = {}) {
       ready: missing.length === 0,
       missing,
       registryFile,
-      ordinarySpreadsheetImport: { enabled: Boolean(config.enabled) && missing.length === 0,
-        formats: ["xlsx", "xls"], contentMode: "display_text", maxFileBytes: LIMITS.bytes,
-        maxSheets: LIMITS.sheets, maxCellsPerSheet: LIMITS.cellsPerSheet },
+      ordinarySpreadsheetImport: { enabled: false, reason: "temporarily_unsupported" },
       docTypes: Object.fromEntries(Object.keys(DOC_KIND_SPECS).map((kind) => {
         const spec = docKindSpec(config, kind);
         return [kind, spec.docType];
@@ -486,9 +474,9 @@ function createDocCreatorModule(options = {}) {
     createSmartDocument: (input = {}) => createSmartDocument(config, input, logger),
     createSmartSheet: (input = {}) => createSmartSheet(config, input, logger),
     createSpreadsheet: (input = {}) => createDocument(config, input, "spreadsheet", logger, services),
-    importExcel: (input = {}) => {
-      if (!config.enabled || missingCreateRequired(config).length) return Promise.resolve({ ok: false, text: "普通表格转换未启用或缺少企业微信文档配置，请联系管理员。" });
-      return importer.importExcel(input);
+    importExcel: () => {
+      logger.info("WeDoc Excel import rejected", { reason: "temporarily_unsupported" });
+      return Promise.resolve({ ok: false, status: "unsupported", text: EXCEL_IMPORT_UNSUPPORTED });
     },
     getStatus
   };
