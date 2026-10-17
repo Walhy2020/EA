@@ -1,6 +1,9 @@
 (function () {
   "use strict";
   const M = window.AssignmentDemo;
+  const embedded = new URLSearchParams(window.location.search).get("embed") === "1" && window.parent !== window;
+  document.body.classList.toggle("host-embedded", embedded);
+  let hostContext = null;
   const $ = selector => document.querySelector(selector);
   const html = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
   const icon = name => `<i data-lucide="${name}" aria-hidden="true"></i>`;
@@ -22,6 +25,7 @@
   }
   function visibleTasks() {
     return M.tasks.filter(t => t.roles.includes(state.role) && (state.project === "all" || t.project === state.project)
+      && (!state.allowedProjects || state.allowedProjects.includes(t.project))
       && `${t.title} ${t.id}`.toLowerCase().includes(state.search.toLowerCase())
       && (state.filter === "all" || Boolean(state.assignments[`${t.id}:${state.role}`]) === (state.filter === "assigned")));
   }
@@ -99,7 +103,8 @@
     $("#task-detail").innerHTML = `${renderHeader(t)}<div class="candidate-table"><div class="candidate-table-head"><span>候选人 / 所属组长</span><span>确定负载</span><span>预占负载</span><span>加入新任务后的影响</span><span>操作</span></div>${currentResults().map(candidate).join("")}</div><div class="results-foot"><span>${icon("info")}同一人的不同岗位合并计量</span><span>工作日 1 人日 / 人</span></div>`;
   }
   function renderCoord() {
-    const items = state.coordination.filter(c => c.role === state.role && (state.project === "all" || c.project === state.project));
+    const items = state.coordination.filter(c => c.role === state.role && (state.project === "all" || c.project === state.project)
+      && (!state.allowedProjects || state.allowedProjects.includes(c.project)));
     $("#coord-count").textContent = state.coordination.filter(c => !["无法满足", "已被新分配替代"].includes(c.status)).length;
     $("#coord-view").innerHTML = `<div class="coord-heading"><div><h2>跨岗位协调</h2><p>由${role().name}分配产生 · ${items.length} 项</p></div><span class="tag neutral">演示记录</span></div>${items.length ? items.map(c => `<article class="coord-item"><div class="coord-item-header"><div><span class="muted small">${html(c.project)} · ${c.taskId}</span><h3>${html(c.title)}</h3></div><span class="status ${c.status === "无法满足" || c.status === "承诺日期仍冲突" ? "conflict" : "coord"}">${html(c.status)}</span></div><p>${html(c.personName)}的${M.roles.find(r => r.id === c.role).name}工作，需要${html(c.upstream)}确认上游交付。</p><dl class="coord-meta"><div><dt>需要交付日期</dt><dd>${M.day(c.required)}</dd></div><div><dt>协调对象</dt><dd>${html(c.upstream)}（演示）</dd></div><div><dt>分配发起人</dt><dd>演示组长</dd></div></dl>${c.date ? `<p class="commitment">承诺日期：${html(c.date)} · ${c.date > M.day(c.required) ? "晚于所需日期" : "日期条件满足，联合排期待复核"}</p>` : ""}${c.note ? `<p class="coord-note">${html(c.note)}</p>` : ""}${c.status !== "已被新分配替代" ? `<div class="coord-actions"><button class="secondary-button" data-promise="${c.id}">${icon("calendar-check")}提交交付承诺</button><button class="text-button danger" data-reject="${c.id}">无法满足</button></div>` : ""}</article>`).join("") : `<div class="empty-state large">${icon("messages-square")}<h3>暂无协调事项</h3><p>当前岗位没有演示分配产生的待协调项。</p><button class="secondary-button" data-action="show-assign">返回分配参考</button></div>`}`;
   }
@@ -115,6 +120,7 @@
     $("#dialog-content").innerHTML = content;
     icons();
     $("#confirm-dialog").showModal();
+    if (embedded) $("#confirm-dialog").scrollIntoView({ block: "center" });
   }
   function closeDialog() { $("#confirm-dialog").close(); if (dialogReturnTarget?.isConnected) dialogReturnTarget.focus(); }
   function dialogHeader(title, label = "演示操作") {
@@ -179,6 +185,7 @@
       case "clear-filter": state.search = ""; state.filter = "all"; state.project = "all"; $("#search").value = ""; $("#task-status").value = "all"; $("#project").value = "all"; updateFilter(); break;
       case "reset-confirm": state.assignments = {}; state.coordination = []; state.history = []; state.selection = null; state.search = ""; state.project = "all"; state.filter = "all"; state.role = "fe"; state.view = "assign"; state.sort = "risk"; $("#search").value = ""; $("#project").value = "all"; $("#task-status").value = "all"; closeDialog(); selectTask(M.tasks[0].id); toast("演示已重置"); break;
     }
+    if (embedded && hostContext && ["clear-filter", "reset-confirm"].includes(b.dataset.action)) applyHostContext(hostContext);
   });
   document.addEventListener("change", event => {
     const el = event.target;
@@ -215,5 +222,31 @@
     }
   });
   $("#confirm-dialog").addEventListener("click", event => { if (event.target === $("#confirm-dialog")) closeDialog(); });
+  function applyHostContext(context) {
+    state.project = typeof context.project === "string" ? context.project : "all";
+    state.allowedProjects = state.project === "all" && Array.isArray(context.projects) ? context.projects.filter(p => typeof p === "string") : null;
+    document.body.dataset.projectTheme = String(context.theme || "");
+    updateFilter();
+    renderCoord();
+    icons();
+  }
+  if (embedded) {
+    window.addEventListener("message", event => {
+      if (event.source !== window.parent || event.origin !== window.location.origin || event.data?.type !== "ea-assignment-preview-context") return;
+      hostContext = event.data;
+      applyHostContext(hostContext);
+    });
+    let scheduled = false;
+    const reportHeight = () => {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(() => {
+        scheduled = false;
+        window.parent.postMessage({ type: "ea-assignment-preview-height", height: Math.ceil(document.body.getBoundingClientRect().height) + 2 }, "*");
+      });
+    };
+    new ResizeObserver(reportHeight).observe(document.body);
+    window.parent.postMessage({ type: "ea-assignment-preview-ready" }, "*");
+  }
   render();
 })();

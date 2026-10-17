@@ -13,7 +13,8 @@ const panels = {
   todo: document.getElementById("panel-todo"),
   memberTodo: document.getElementById("panel-memberTodo"),
   draft: document.getElementById("panel-draft"),
-  fallback: document.getElementById("panel-fallback")
+  fallback: document.getElementById("panel-fallback"),
+  assignment: document.getElementById("panel-assignment")
 };
 
 const tabButtons = [...document.querySelectorAll(".tab-button")];
@@ -435,6 +436,11 @@ function switchPanel(name) {
 
 function activatePanel(name) {
   const nextName = normalizePanelName(name);
+  document.body.classList.toggle("assignment-preview-active", nextName === "assignment");
+  if (nextName === "assignment") {
+    syncAssignmentPreview();
+    window.EAAssignmentPreview?.show();
+  }
   for (const [panelName, panel] of Object.entries(panels)) {
     panel.classList.toggle("active", panelName === nextName);
   }
@@ -497,6 +503,15 @@ function switchProject(projectName) {
   if (draftProjectOutput) {
     draftProjectOutput.textContent = nextProjectName;
   }
+  syncAssignmentPreview();
+}
+
+function syncAssignmentPreview() {
+  window.EAAssignmentPreview?.sync({
+    project: selectedProjectQueryValue() || "all",
+    projects: projectSettings.allProjects,
+    theme: document.documentElement.dataset.projectTheme || ""
+  });
 }
 
 function applyProjectTheme(projectName) {
@@ -1304,7 +1319,6 @@ async function refreshCollaborationData(options = {}) {
     return collaborationLoadPromise;
   }
 
-  const panelName = options.panelName || activePanelName();
   setListLoading(true);
   collaborationLoadPromise = loadCollaborationData(options)
     .catch((error) => {
@@ -1314,7 +1328,8 @@ async function refreshCollaborationData(options = {}) {
     })
     .finally(() => {
       setListLoading(false);
-      switchPanel(panelName);
+      // Preserve navigation made while the asynchronous refresh was in flight.
+      switchPanel(activePanelName());
       collaborationLoadPromise = null;
     });
   return collaborationLoadPromise;

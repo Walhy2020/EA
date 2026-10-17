@@ -1317,6 +1317,30 @@ textarea:focus {
   text-align: right;
 }
 
+.assignment-preview-label {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.tab-button.active .assignment-preview-label { color: inherit; opacity: 0.85; }
+
+#assignmentPreviewFrame {
+  display: block;
+  width: 100%;
+  min-height: 400px;
+  height: 900px;
+  border: 0;
+  background: transparent;
+}
+
+@media (min-width: 700px) {
+  body.assignment-preview-active .app-shell { max-width: 1440px; }
+  .tabs, .tabs.leader-tabs, .tabs.fallback-tabs {
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  }
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -1355,7 +1379,7 @@ textarea:focus {
   }
 
   .tabs.fallback-tabs {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   }
 }
 

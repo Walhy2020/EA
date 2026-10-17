@@ -4,7 +4,7 @@
   else root.AssignmentDemo = model;
 })(typeof window === "object" ? window : globalThis, function () {
   "use strict";
-  const version = "0.1.0";
+  const version = "0.1.1";
   const roles = [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "UI", field: "UI人员" }, { id: "plan", name: "策划", field: "策划人员" }];
   const days = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"];
   const tasks = [
