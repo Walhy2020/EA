@@ -8,7 +8,7 @@ const DAYS = ["2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-2
 function record(id, fields = {}) {
   return { recordId: `r${id}`, fields: { "需求Id": `00${id}`, "需求名称": `Task${id}`, "需求类型": "新功能", "项目": "P", "需求进度": "待分配", "前端开发": "", "后端开发": "-", "UI需求": "-", "UI人员": "-", "开发截止日期": "2026-10-20", "美术截止日期": "2026-10-20", ...fields } };
 }
-function fixture(rows = [record(1)], overrides = {}) {
+function fixture(rows = [record(1)], overrides = {}, factory = createAssignmentReferenceService) {
   let time = NOW;
   const settings = { enabled: true, ready: true, docid: "doc", sheetId: "sheet", viewId: "view", fieldMapping: {}, personAliases: { Alice: ["A"] }, rules: { requiredFields: { fallbackOwners: ["Boss"], leaders: { "前端组长": { memberField: "前端开发", names: ["L3"], memberGroups: { L3: ["Carol"] } } } } } };
   const workflow = { normalizedRules: { roles: {
@@ -19,7 +19,7 @@ function fixture(rows = [record(1)], overrides = {}) {
   const calls = [];
   let active = 0;
   let maxActive = 0;
-  const service = createAssignmentReferenceService({ getSettings: () => settings, getWorkflowRulesSettings: () => workflow,
+  const service = factory({ getSettings: () => settings, getWorkflowRulesSettings: () => workflow,
     nowMs: () => time, readFieldDefinitions: async () => ({ ok: true, fields: FIELDS.map((title) => ({ title })) }),
     readWorkdayCalendar: async () => ({ ok: true, dates: DAYS }),
     readRecords: async (s, o) => {
@@ -55,7 +55,7 @@ test("same-role leaders see the whole pool including other groups", async () => 
   const b = await query(f, { userName: "L2" });
   assert.deepEqual(a.candidates.map((c) => c.name).sort(), ["Alice", "Bob", "Carol"]);
   assert.deepEqual(a.candidates, b.candidates);
-  assert.equal(a.version, "0.2.0");
+  assert.equal(a.version, "0.2.1");
   assert.equal(a.readOnly, true);
   assert(a.candidates.every((c) => c.reasons.some((r) => r.includes("资格未校验"))));
 });
@@ -65,6 +65,34 @@ test("target filtering respects participation, state, type, and project", async 
   assert.deepEqual(r.tasks.map((t) => t.id), ["r1"]);
   assert.equal(r.tasks[0].demandId, "001");
   assert.equal((await query(f, { taskId: "r3" })).httpStatus, 404);
+});
+test("module integration matches real source project aliases in all roles", async () => {
+  const { createDevProgressModule } = require("../src/modules/devProgress/devProgressModule");
+  const factory = (options) => ({ query: createDevProgressModule(options).queryAssignmentReference });
+  for (const [source, display] of [["高校", "恶魔高校"], ["一骑", "一骑当千"], ["女王", "女王之刃"], ["嗜血", "噬血狂袭"], ["QB", "女王之刃"], ["魔王", "魔王"]]) {
+    const f = fixture([record(1, { "项目": source, "后端开发": "", "UI人员": "", "UI需求": "需要" }), record(2, { "项目": "Other" })], {}, factory);
+    for (const role of ["fe", "be", "ui"]) {
+      const r = await query(f, { userName: "Boss", project: display, role });
+      assert.deepEqual(r.tasks.map((t) => t.id), ["r1"], `${source} -> ${display}, ${role}`);
+      assert(r.candidates.length > 0);
+      const { visibleTasks } = require("../src/admin/static/assignment-preview/model");
+      assert.equal(visibleTasks(r.tasks, [display === "噬血狂袭" ? "嗜血" : display], "", "asc").length, 1);
+      if (source === "高校") assert.equal(r.tasks[0].project, "恶魔高校");
+    }
+    assert.deepEqual((await query(f, { project: source })).tasks.map((t) => t.id), ["r1"]);
+  }
+});
+test("module project aliases honor configuration without substring or empty project matches", async () => {
+  const { createDevProgressModule } = require("../src/modules/devProgress/devProgressModule");
+  const f = fixture([record(1, { "项目": "Short" }), record(2, { "项目": "高校2" }), record(3, { "项目": "" }), record(4, { "项目": "高校", "前端开发": "Alice" }), record(5, { "项目": "高校", "需求进度": "实现中" })], {},
+    (options) => ({ query: createDevProgressModule(options).queryAssignmentReference }));
+  f.settings.projectAliases = { Short: "Full Project" };
+  assert.deepEqual((await query(f, { project: "Full Project" })).tasks.map((t) => t.id), ["r1"]);
+  assert.deepEqual((await query(f, { project: "恶魔高校" })).tasks, []);
+  assert.deepEqual((await query(f, { project: "Unknown" })).tasks, []);
+  assert.deepEqual((await query(f, { project: "all" })).tasks.map((t) => t.id), ["r1", "r2", "r3"]);
+  f.settings.versionProjectAliases = { Short: "Version Name" };
+  assert.deepEqual((await query(f, { project: "Version Name" })).tasks.map((t) => t.id), ["r1"]);
 });
 test("cross-role alias and cross-project load merge; project filters targets only", async () => {
   const f = fixture([record(1), record(2, { "项目": "Q", "需求进度": "实现中", "前端开发": "Alice", "前端耗时": 3, "前端剩余": 2 }), record(3, { "项目": "Q", "需求进度": "实现中", "前端开发": "-", "后端开发": "A", "后端耗时": 3, "后端剩余": 2 })]);

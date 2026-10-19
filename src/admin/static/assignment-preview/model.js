@@ -4,7 +4,7 @@
   else root.AssignmentReference = model;
 })(typeof window === "object" ? window : globalThis, function () {
   "use strict";
-  const version = "0.2.0";
+  const version = "0.2.1";
   const labels = { missing: "数据不足", conflict: "存在明确冲突", conditional: "有条件参考" };
   const itemRole = value => ({ fe: "前端", be: "后端", ui: "美术" })[value] || "岗位待核实";
   const itemSource = value => ({ formal_remaining: "正式剩余", unknown_reservation: "未量化预占", unknown: "来源待核实" })[value] || "来源待核实";

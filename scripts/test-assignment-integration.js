@@ -14,7 +14,7 @@ function fixture(url) {
     { id: "record-a", demandId: "001234", title: "真实需求甲", project, state: "待分配", type: "优化", summary: "需求总表真实内容", deadline: "2026-10-23", effort: null, warnings: [] },
     { id: "record-b", demandId: "001235", title: "真实需求乙", project, state: "待分配", type: "新功能", summary: "另一条需求", deadline: "2026-10-21", effort: null, warnings: [] }
   ];
-  return { ok: true, status: "ok", readOnly: true, version: "0.2.0", generatedAt: "2026-10-19T04:00:00.000Z",
+  return { ok: true, status: "ok", readOnly: true, version: "0.2.1", generatedAt: "2026-10-19T04:00:00.000Z",
     identity: { name: "页面验收组长", isFallback: true },
     roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "美术", field: "UI人员" }],
     role, tasks, taskId: tasks.length ? taskId : null,

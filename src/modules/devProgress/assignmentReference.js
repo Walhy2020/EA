@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const ROLES = [
   { id: "fe", name: "前端", field: "前端开发", total: "前端耗时", remaining: "前端剩余", owner: "frontend", due: "开发截止日期", leader: "前端组长" },
   { id: "be", name: "后端", field: "后端开发", total: "后端耗时", remaining: "后端剩余", owner: "backend", due: "开发截止日期", leader: "后端组长" },
@@ -78,7 +78,7 @@ function roleConfig(settings, workflow, role) {
 
 // Readers use the original client convention: readRecords(settings, options).
 // This service never writes source records, files, or notifications.
-function createAssignmentReferenceService({ getSettings, getWorkflowRulesSettings, readFieldDefinitions, readRecords, readWorkdayCalendar, nowMs = Date.now, logger } = {}) {
+function createAssignmentReferenceService({ getSettings, getWorkflowRulesSettings, readFieldDefinitions, readRecords, readWorkdayCalendar, resolveProjectName = (name) => name, nowMs = Date.now, logger } = {}) {
   let cached = null;
   const inflight = new Map();
   let activeReads = 0;
@@ -197,8 +197,12 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
       base.warnings = ["只读参考；候选资格未校验；仅计算已知截止容量压力下界，不是完整联合排期或安全承诺", "未验证可承接岗位资格；不提供历史经验推断"];
       if (!base.calendar.ok || today < days[0] || today > days.at(-1)) base.warnings.push("工作日日历无效或未覆盖今天");
       const project = str(input.project) === "all" ? "" : str(input.project);
+      const projectKey = (name) => str(resolveProjectName(str(name), settings)).replace(/\s+/g, "").toLowerCase();
+      const targetProject = projectKey(project);
       const eligible = records.filter((r) => str(value(r, "需求进度")) === "待分配" && str(value(r, "需求类型")) !== "任务拆分"
-        && participates(r, role) && !str(value(r, role.field)) && (!project || str(value(r, "项目")) === project));
+        && participates(r, role) && !str(value(r, role.field)) && (!project || projectKey(value(r, "项目")) === targetProject));
+      base.source.projectFilter = { requested: project, canonical: targetProject };
+      logger?.info?.("assignment_reference_filtered", { role: role.id, project, canonicalProject: targetProject, recordCount: records.length, taskCount: eligible.length, cacheHit: loaded.cacheHit });
       base.tasks = eligible.map((r) => {
         const warnings = [];
         if (!str(value(r, "需求名称"))) warnings.push("需求名称缺失");
@@ -208,7 +212,7 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
         const deadline = date(value(r, role.due));
         if (!covered(deadline)) warnings.push("期限缺失、格式错误或日历覆盖不足");
         if (/bug/i.test(str(value(r, "需求类型"))) && effort === null) warnings.push("Bug无人工粗估，不作新增工作量精算");
-        return { id: str(r.recordId || r.id), demandId: str(value(r, "需求Id")), title: str(value(r, "需求名称")), project: str(value(r, "项目")), state: "待分配", type: str(value(r, "需求类型")), summary: str(value(r, "需求内容")), deadline, effort: null, warnings };
+        return { id: str(r.recordId || r.id), demandId: str(value(r, "需求Id")), title: str(value(r, "需求名称")), project: str(resolveProjectName(str(value(r, "项目")), settings)), state: "待分配", type: str(value(r, "需求类型")), summary: str(value(r, "需求内容")), deadline, effort: null, warnings };
       });
       const selected = input.taskId ? eligible.find((r) => str(r.recordId || r.id) === str(input.taskId)) : eligible[0];
       if (input.taskId && !selected) return fail("task_unavailable", "需求不在当前岗位和项目的可分配池中", 404);

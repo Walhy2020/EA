@@ -33,7 +33,7 @@
     try {
       const response = await fetch(`/api/dev-progress/assignment-reference?${params}`, {
         cache: "no-store", credentials: "same-origin", signal: controller.signal,
-        headers: { "X-EA-Demand-Page-Version": "assignment-0.2.0" }
+        headers: { "X-EA-Demand-Page-Version": "assignment-0.2.1" }
       });
       const payload = await response.json();
       if (activeRequest !== controller) return;

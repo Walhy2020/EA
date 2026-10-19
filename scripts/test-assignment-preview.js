@@ -18,14 +18,14 @@ function result(query = {}) {
     { id: "record-2", demandId: "REQ-102", title: "", project: "目标项目", state: "待分配", type: "功能", summary: "需求内容", deadline: "2026-11-03", effort: null, warnings: ["缺少需求名称"] },
     { id: "record-hidden", demandId: "REQ-103", title: "其他目标项目需求", project: "不在目标范围", state: "待分配", deadline: null, warnings: [] }
   ];
-  return { ok: true, status: "ok", message: "查询完成", version: "0.2.0", readOnly: true, generatedAt: "2026-10-18T08:30:00+08:00", identity: { name: "签名会话组长", isFallback: false }, roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }], role, tasks, taskId: query.taskId || specialId,
+  return { ok: true, status: "ok", message: "查询完成", version: "0.2.1", readOnly: true, generatedAt: "2026-10-18T08:30:00+08:00", identity: { name: "签名会话组长", isFallback: false }, roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }], role, tasks, taskId: query.taskId || specialId,
     calendar: { ok: true, firstDate: "2026-10-19", lastDate: "2026-11-03", today: "2026-10-19", workdays: ["2026-10-19"] },
     candidates: [{ id: 'person-"<>', name: "跨组候选人", job: "前端 / 后端", leader: "另一组长", total: 4, reservation: 0, unknownCount: 2, status: query.effort === null || query.effort === undefined ? "missing" : "conditional", baseline: 0, gap: query.effort ? 1 : null, delta: query.effort ? 1 : null, quantified: Boolean(query.effort),
       items: [{ id: 'work-"<>', title: "跨项目负载", project: "负载来自其他项目", role: "be", effort: 4, due: "2026-10-30", source: "formal_remaining", reserved: false }, { id: "unknown", title: "未量化任务", project: "其他项目", role: "unrecognized_role", effort: null, due: null, source: "unknown_reservation", reserved: true }, { id: "unknown-source", title: "未知来源任务", project: "其他项目", role: "ui", effort: null, due: null, source: "unrecognized_source", reserved: false }], reasons: ["存在未量化工作量"], dependencies: ["上游交付待确认 <script>"] }], warnings: ["容量仅为下界"], source: { recordCount: 3, cacheHit: true } };
 }
 
 function modelChecks() {
-  assert.equal(M.version, "0.2.0");
+  assert.equal(M.version, "0.2.1");
   assert.equal(M.effort(""), null);
   assert.equal(M.effort(null), null);
   for (const n of [0, -1, 40.01, Infinity, "bad"]) assert.throws(() => M.effort(n));
