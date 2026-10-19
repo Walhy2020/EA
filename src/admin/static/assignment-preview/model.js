@@ -4,8 +4,8 @@
   else root.AssignmentDemo = model;
 })(typeof window === "object" ? window : globalThis, function () {
   "use strict";
-  const version = "0.1.1";
-  const roles = [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "UI", field: "UI人员" }, { id: "plan", name: "策划", field: "策划人员" }];
+  const version = "0.1.2";
+  const roles = [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "美术", field: "UI人员" }];
   const days = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"];
   const tasks = [
     { id: "DEMO-01026", title: "活动入口优化", project: "恶魔高校", state: "待分配", type: "优化", deadline: 4, effort: 2, summary: "活动首页新增限时入口与状态展示，接入活动配置和领取接口。", chain: "ready", roles: ["fe", "be", "ui", "plan"] },

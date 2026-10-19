@@ -36,6 +36,12 @@ async function main() {
     await page.locator('[data-select="lin"]').waitFor();
     assert.equal(await page.locator(".candidate").count(), 4);
     assert.equal(await page.locator(".task-item").count(), 4);
+    assert.equal(await page.locator('[data-view="coord"], #coord-view, #task-status, #sort, .breadcrumb, .result-heading').count(), 0);
+    assert.equal(await page.locator('[data-role]').count(), 3);
+    assert.equal(await page.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01038');
+    await page.locator('#time-sort').click();
+    assert.equal(await page.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01042');
+    await page.locator('[data-task="DEMO-01026"]').click();
     assert.ok(await page.locator("svg").count() > 10, "local icon assets loaded");
     assert.ok(await page.locator('.brand img').evaluate(img => img.complete && img.naturalWidth === 96));
     await page.screenshot({ path: path.join(output, "desktop.png"), fullPage: true });
@@ -59,8 +65,8 @@ async function main() {
     assert.equal(await page.locator(".success-receipt").count(), 0, "cancel leaves assignment untouched");
     await page.locator("#effort").fill("0");
     assert.ok(await page.locator('[data-select="lin"]').isDisabled());
-    await page.locator("#sort").selectOption("load");
-    assert.ok(await page.locator('[data-select="lin"]').isDisabled(), "sort must not re-enable stale results");
+    await page.locator("#time-sort").click();
+    assert.ok(await page.locator('[data-select="lin"]').isDisabled(), "deadline sort must not re-enable stale results");
     await page.locator("#effort").fill("3");
     await page.locator('#estimate-form button[type="submit"]').click();
     assert.match(await page.locator('[data-person="lin"] .status').textContent(), /冲突/);
@@ -75,35 +81,33 @@ async function main() {
     await page.locator("#risk-ack").check();
     await page.locator("#confirm-assignment").click();
     assert.match(await page.locator(".success-receipt").textContent(), /陈沐/);
-    await page.locator('[data-action="show-coord"]').click();
-    assert.equal(await page.locator(".coord-item").count(), 1);
-    await page.locator("[data-promise]").click();
-    await page.locator("#promise-note").fill("优先安排接口交付，仍需核对其他需求。");
-    await page.locator('#coord-form button[type="submit"]').click();
-    assert.match(await page.locator(".coord-item-header .status").textContent(), /已承诺待复核/);
-    await page.screenshot({ path: path.join(output, "coordination.png"), fullPage: true });
-    await page.locator("button[data-reject]").click();
-    await page.locator("#promise-note").fill("其他需求已有明确截止承诺。");
-    await page.locator('#coord-form button[type="submit"]').click();
-    assert.match(await page.locator(".coord-item-header .status").textContent(), /无法满足/);
-    await page.locator('[data-view="assign"]').click();
+    assert.match(await page.locator('.task-meta').textContent(), /陈沐/);
+    assert.equal(await page.locator('.task-item').count(), 3);
     await page.locator("#search").fill("does-not-exist");
     assert.equal(await page.locator(".task-item").count(), 0);
     await page.locator('[data-action="clear-filter"]').click();
-    assert.equal(await page.locator(".task-item").count(), 4);
-    await page.locator('[data-role="plan"]').click();
-    assert.equal(await page.locator(".task-item").count(), 5);
+    assert.equal(await page.locator(".task-item").count(), 3);
+    for (const persona of ['fe', 'be', 'ui']) {
+      await page.locator('#persona').selectOption(persona);
+      assert.deepEqual(await page.locator('[data-role]').evaluateAll(buttons => buttons.map(b => b.dataset.role)), [persona]);
+      assert.ok(await page.locator('.candidate').count() >= 3);
+    }
     await page.locator("#project").selectOption("一骑当千");
-    assert.equal(await page.locator(".task-item").count(), 2);
+    assert.equal(await page.locator(".task-item").count(), 1, "only pending tasks shown");
     await page.locator("#reset").click();
     await page.locator('[data-action="reset-confirm"]').click();
-    assert.equal(await page.locator("#coord-count").textContent(), "0");
     assert.equal(await page.locator(".success-receipt").count(), 0);
-    assert.equal(await page.locator("#sort").inputValue(), "risk");
+    assert.equal(await page.locator("#persona").inputValue(), "ui", "reset preserves preview identity");
+    assert.equal(await page.locator("#project").inputValue(), "一骑当千", "reset preserves project");
+    await page.locator('#persona').selectOption('fallback');
+    await page.locator('[data-role="fe"]').click();
+    await page.locator('#project').selectOption('all');
+    await page.locator('[data-task="DEMO-01026"]').click();
     await page.locator("#toast").waitFor({ state: "hidden", timeout: 6000 });
     for (const width of [1440, 1024, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       if (width <= 760) {
+        if (await page.locator('.mobile-back').isVisible()) await page.locator('[data-action="back"]').click();
         await page.locator('[data-task="DEMO-01026"]').click();
         assert.ok(await page.locator(".mobile-back").isVisible());
       }
@@ -120,7 +124,7 @@ async function main() {
     }
     assert.deepEqual(errors, [], "no runtime errors");
     assert.deepEqual(requests.filter(url => url.includes("/api/")), [], "no production API calls");
-    console.log(`Assignment preview checks passed: model, filters, roles, estimates, evidence, risk confirmation, coordination, reset, responsive 320-1440. Screenshots: ${output}`);
+    console.log(`Assignment preview checks passed: model, pending tasks, role scope, deadline sorting, estimates, evidence, demo owner selection, reset, responsive 320-1440. Screenshots: ${output}`);
   } finally { await browser.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

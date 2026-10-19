@@ -9,6 +9,22 @@ dialog{padding:0;border:1px solid var(--line);border-radius:8px;max-width:560px;
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 
 body.host-embedded { background: transparent; }
+.role-bar { flex-wrap: wrap; }
+.preview-persona { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.preview-persona select { min-height: 34px; font-size: 12px; }
+.list-tools { display: flex; align-items: center; gap: 5px; margin: 0 12px 16px 15px; }
+.list-tools .search { margin: 0; flex: 1; min-width: 0; padding-inline: 8px; }
+.list-tools .search input { min-width: 0; }
+.list-tools .search svg { width: 14px; }
+.list-tools .icon-button { width: 32px; height: 36px; }
+.task-pane .task-item { min-height: 88px; }
+.task-item strong { margin-top: 0; }
+.candidate-table { margin-top: 22px; }
+.analysis-state { margin-top: 9px; font-size: 12px; }
+@media (max-width: 760px) {
+  .preview-persona { margin-left: auto; }
+  .preview-persona select { font-size: 16px; }
+}
 .host-embedded > .app-header,
 .host-embedded .context-bar,
 .host-embedded .main-nav > a { display: none; }

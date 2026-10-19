@@ -22,7 +22,7 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1050 }, ignoreHTTPSErrors: true });
     const errors = [];
     const apiCalls = [];
-    page.on("pageerror", error => errors.push(error.message));
+    page.on("pageerror", error => { errors.push(error.message); console.error(`Browser error: ${error.message}`); });
     await page.route("**/api/**", async route => {
       const req = route.request();
       apiCalls.push({ method: req.method(), url: req.url(), child: req.frame().parentFrame() !== null });
@@ -42,7 +42,24 @@ async function main() {
     assert.equal(await frame.locator(".task-item").count(), 2, "parent project filters synthetic tasks");
     assert.equal(await frame.locator(".app-header").isVisible(), false, "no duplicate app header");
     assert.equal(await frame.locator("#project").isVisible(), false, "one shared project selector");
-    assert.equal(await frame.locator(".main-nav a").isVisible(), false);
+    assert.equal(await frame.locator('[data-view="coord"], #coord-view').count(), 0, "coordination removed from preview");
+    assert.equal(await frame.locator(".breadcrumb, .result-heading, #task-status, #sort").count(), 0, "duplicate details and selectors removed");
+    assert.equal(await frame.locator('[data-role]').count(), 3, "fallback persona supports technical and art roles");
+    await frame.locator('#persona').selectOption('fe');
+    assert.equal(await frame.locator('[data-role]').count(), 1, "front-end leader only sees front-end");
+    assert.match(await frame.locator('.person').first().textContent(), /前端/);
+    await frame.locator('#persona').selectOption('ui');
+    assert.equal(await frame.locator('[data-role]').count(), 1);
+    assert.match(await frame.locator('.task-meta').textContent(), /美术/);
+    assert.equal(await frame.locator('.task-item').count(), 2, "art leader sees all pending art tasks in current project");
+    await frame.locator('#persona').selectOption('fallback');
+    await frame.locator('[data-role="fe"]').click();
+    assert.equal(await frame.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01038', "earliest deadline first");
+    await frame.locator('#time-sort').click();
+    assert.equal(await frame.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01026', "deadline order reverses");
+    await frame.locator('#reset svg').evaluate(el => { el.dataset.testStable = 'yes'; });
+    await frame.locator('[data-task="DEMO-01026"]').click();
+    assert.equal(await frame.locator('#reset svg').getAttribute('data-test-stable'), 'yes', "rendering task content does not replace the reset icon under the pointer");
     assert.ok(await page.locator("#sessionUserName").textContent() === "页面验收组长");
     assert.equal(await page.locator("#assignmentPreviewFrame").getAttribute("sandbox"), "allow-scripts allow-forms");
     const frameHeight = await page.locator("#assignmentPreviewFrame").evaluate(el => el.getBoundingClientRect().height);
@@ -53,23 +70,25 @@ async function main() {
     await frame.locator("#risk-ack").check();
     await frame.locator("#confirm-assignment").click();
     assert.match(await frame.locator(".success-receipt").textContent(), /陈沐/);
-    await frame.locator('[data-action="show-coord"]').click();
-    await frame.locator("[data-promise]").click();
-    await frame.locator('#coord-form button[type="submit"]').click();
-    assert.match(await frame.locator(".coord-item-header .status").textContent(), /待复核/);
+    assert.match(await frame.locator('.task-meta').textContent(), /陈沐/, "selection changes only demo current owner");
+    assert.equal(await frame.locator('.task-item').count(), 1, "assigned demo task leaves pending list");
     await page.locator('[data-panel="todo"]').click();
     assert.ok(await page.locator("#panel-todo").isVisible());
     assert.ok(await page.locator("#panel-assignment").isHidden());
     await page.locator('[data-panel="draft"]').click();
     assert.ok(await page.locator("#panel-draft").isVisible());
     await page.locator('[data-panel="assignment"]').click();
-    await frame.locator('[data-view="assign"]').click();
     assert.match(await frame.locator(".success-receipt").textContent(), /陈沐/, "tab switching preserves demo state");
     await page.locator("#projectSelect").selectOption("女王之刃");
     await page.waitForLoadState("networkidle");
     assert.equal(await frame.locator(".task-item").count(), 1);
     assert.match(await frame.locator(".task-item").textContent(), /角色详情/);
+    // Allow the host scroll restoration and sandbox resize messages to settle before pointer input.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await frame.locator('body').evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await frame.locator("#reset").click();
+    await frame.locator('#confirm-dialog').waitFor({ state: 'visible' });
+    await page.screenshot({ path: path.join(output, "reset-dialog.png"), fullPage: true });
     await frame.locator('[data-action="reset-confirm"]').click();
     assert.equal(await frame.locator(".task-item").count(), 1, "reset cannot override host project");
     await page.locator("#projectSelect").selectOption("魔王");
@@ -87,6 +106,7 @@ async function main() {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `host width ${width}`);
       assert.equal(await frame.locator("body").evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `child width ${width}`);
       if (width === 390) {
+        if (await frame.locator('.mobile-back').isVisible()) await frame.locator('[data-action="back"]').click();
         await frame.locator('[data-task="DEMO-01026"]').click();
         await page.waitForTimeout(350);
         assert.ok(await frame.locator(".candidate").last().evaluate(el => el.getBoundingClientRect().bottom <= innerHeight + 1), "last candidate fits the expanded frame");

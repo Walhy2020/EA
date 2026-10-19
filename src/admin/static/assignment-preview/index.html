@@ -6,15 +6,15 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>分配参考 · EA 需求进度管理</title>
   <link rel="icon" href="./assets/ea.png">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=0.1.2">
   <script src="./assets/lucide.min.js" defer></script>
-  <script src="./model.js" defer></script>
-  <script src="./app.js" defer></script>
+  <script src="./model.js?v=0.1.2" defer></script>
+  <script src="./app.js?v=0.1.2" defer></script>
 </head>
 <body>
   <header class="app-header">
     <div class="brand"><img src="./assets/ea.png" width="38" height="38" alt="EA"><div><span class="eyebrow">EA 系统</span><h1>需求进度管理</h1></div></div>
-    <div class="header-right"><span class="preview-tag">交互预览 <span>v0.1.1</span></span><span class="identity"><i data-lucide="user-round"></i>演示组长</span></div>
+    <div class="header-right"><span class="preview-tag">交互预览 <span>v0.1.2</span></span><span class="identity"><i data-lucide="user-round"></i>演示组长</span></div>
   </header>
   <div class="preview-strip"><span><i data-lucide="flask-conical"></i>演示数据 · 不写回需求总表，不发送通知</span><button id="reset" class="icon-button" title="重置演示" aria-label="重置演示"><i data-lucide="rotate-ccw"></i></button></div>
   <main class="app-shell">
@@ -22,19 +22,16 @@
       <label class="project-select"><i data-lucide="layers-2"></i><select id="project" aria-label="项目"><option value="all">全部项目</option><option>恶魔高校</option><option>一骑当千</option><option>女王之刃</option></select></label>
       <span class="snapshot"><span class="live-dot"></span>演示快照：2026/10/19 09:00</span>
     </section>
-    <nav class="main-nav" aria-label="页面切换"><a href="/demand-h5.html">需求监控<i data-lucide="arrow-up-right"></i></a><button class="active" data-view="assign" aria-current="page">分配参考</button><button data-view="coord">协调事项 <span id="coord-count" class="count">0</span></button></nav>
-    <section class="role-bar"><div id="role-tabs" class="segmented" role="group" aria-label="查看岗位"></div><span class="muted small">全岗位资源池 · 跨项目合并负载</span></section>
+    <section class="role-bar"><div id="role-tabs" class="segmented" role="group" aria-label="查看岗位"></div><label class="preview-persona">预览身份<select id="persona" aria-label="预览身份"><option value="fallback">总兜底人</option><option value="fe">前端组长</option><option value="be">后端组长</option><option value="ui">美术组长</option></select></label></section>
     <div id="assign-view" class="workbench">
       <aside id="task-pane" class="task-pane" aria-label="需求列表">
-        <div class="list-heading"><h2>需求列表 <span id="task-count" class="muted"></span></h2><select id="task-status" aria-label="需求分配状态"><option value="all">全部</option><option value="unassigned">待分配</option><option value="assigned">已分配 · 未开工</option></select></div>
-        <label class="search"><i data-lucide="search"></i><input id="search" type="search" placeholder="搜索名称或需求 ID" aria-label="搜索需求"></label>
+        <div class="list-heading"><h2>需求列表 <span id="task-count" class="muted"></span></h2></div>
+        <div class="list-tools"><label class="search"><i data-lucide="search"></i><input id="search" type="search" placeholder="搜索名称或需求 ID" aria-label="搜索需求"></label><button id="time-sort" class="icon-button" type="button" title="截止时间：由近到远" aria-label="截止时间：由近到远"><i data-lucide="arrow-up-narrow-wide"></i></button></div>
         <div id="task-list"></div>
-        <p class="list-foot">已开工的岗位不进入改派列表</p>
       </aside>
       <section id="detail-pane" class="detail-pane" aria-label="人员分配分析"><div id="task-detail"></div></section>
     </div>
-    <section id="coord-view" hidden></section>
-    <footer class="page-footer"><span>EA · 分配参考</span><span>预览 v0.1.1 · 全部人员及任务为合成示例</span></footer>
+    <footer class="page-footer"><span>EA · 分配参考</span><span>预览 v0.1.2 · 全部人员及任务为合成示例</span></footer>
   </main>
   <dialog id="confirm-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>
