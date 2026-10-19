@@ -18,14 +18,119 @@ function result(query = {}) {
     { id: "record-2", demandId: "REQ-102", title: "", project: "目标项目", state: "待分配", type: "功能", summary: "需求内容", deadline: "2026-11-03", effort: null, warnings: ["缺少需求名称"] },
     { id: "record-hidden", demandId: "REQ-103", title: "其他目标项目需求", project: "不在目标范围", state: "待分配", deadline: null, warnings: [] }
   ];
-  return { ok: true, status: "ok", message: "查询完成", version: "0.2.1", readOnly: true, generatedAt: "2026-10-18T08:30:00+08:00", identity: { name: "签名会话组长", isFallback: false }, roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }], role, tasks, taskId: query.taskId || specialId,
+  return { ok: true, status: "ok", message: "查询完成", version: "0.2.2", readOnly: true, generatedAt: "2026-10-18T08:30:00+08:00", identity: { name: "签名会话组长", isFallback: false }, roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }], role, tasks, taskId: query.taskId || specialId,
     calendar: { ok: true, firstDate: "2026-10-19", lastDate: "2026-11-03", today: "2026-10-19", workdays: ["2026-10-19"] },
     candidates: [{ id: 'person-"<>', name: "跨组候选人", job: "前端 / 后端", leader: "另一组长", total: 4, reservation: 0, unknownCount: 2, status: query.effort === null || query.effort === undefined ? "missing" : "conditional", baseline: 0, gap: query.effort ? 1 : null, delta: query.effort ? 1 : null, quantified: Boolean(query.effort),
-      items: [{ id: 'work-"<>', title: "跨项目负载", project: "负载来自其他项目", role: "be", effort: 4, due: "2026-10-30", source: "formal_remaining", reserved: false }, { id: "unknown", title: "未量化任务", project: "其他项目", role: "unrecognized_role", effort: null, due: null, source: "unknown_reservation", reserved: true }, { id: "unknown-source", title: "未知来源任务", project: "其他项目", role: "ui", effort: null, due: null, source: "unrecognized_source", reserved: false }], reasons: ["存在未量化工作量"], dependencies: ["上游交付待确认 <script>"] }], warnings: ["容量仅为下界"], source: { recordCount: 3, cacheHit: true } };
+      items: [{ id: 'work-"<>', title: "跨项目负载", project: "负载来自其他项目", role: "be", effort: 4, due: "2026-10-30", source: "formal_remaining", reserved: false }, { id: "unknown", title: "未量化任务", project: "其他项目", role: "unrecognized_role", effort: null, due: null, source: "unknown_reservation", reserved: true }, { id: "unknown-source", title: "未知来源任务", project: "其他项目", role: "ui", effort: null, due: null, source: "unrecognized_source", reserved: false }], reasons: ["存在未量化工作量"], dependencies: ["上游交付待确认 <script>"] }], warnings: ["容量仅为下界"], source: { recordCount: 3, cacheHit: true, snapshotId: "snapshot-fixture", refreshing: false, stale: false, refreshError: "", verifiedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900000).toISOString(), snapshotReused: false, reusedBySignal: false } };
+}
+
+async function refreshChecks(browser, base, output) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
+  await page.goto(`${base}/fixture`);
+  const frame = page.frames().find(f => f.url().includes("embed=1"));
+  let count = 0;
+  const next = async () => { await page.waitForFunction(n => requests.length > n, count); count = await page.evaluate(() => requests.length); return page.evaluate(() => requests.at(-1)); };
+  const send = (req, payload = result(req.query), extra = {}) => page.evaluate(data => send(data), { type: "ea-assignment-reference-result", requestId: req.requestId, result: payload, ...extra });
+  let req = await next();
+  await send(req);
+  await frame.locator('.candidate').waitFor();
+  await frame.locator('[data-evidence]').click();
+  await frame.locator('#search').fill('REQ-101');
+  await frame.locator('#refresh').click();
+  req = await next();
+  assert.equal(req.query.refresh, true);
+  assert.equal(req.query.forceRefresh, false);
+  assert.ok(!req.query.snapshotId, 'active refresh unpins');
+  assert.equal(req.query.taskId, specialId);
+  assert.ok(await frame.locator('.candidate').isVisible(), 'refresh retains conclusions');
+  assert.ok(await frame.locator('.evidence').isVisible(), 'refresh retains evidence');
+  assert.match(await frame.locator('#snapshot').textContent(), /快照.*后台更新/);
+  await send(req, null, { error: '数据源暂不可用', httpStatus: 503 });
+  await frame.locator('.snapshot-notice').filter({ hasText: '刷新失败' }).waitFor();
+  assert.ok(await frame.locator('.candidate').isVisible());
+  await page.screenshot({ path: path.join(output, 'reference-stale-refresh-failed.png'), fullPage: true });
+  assert.equal(await frame.locator('#search').inputValue(), 'REQ-101');
+  await frame.locator('#force-refresh').click();
+  req = await next();
+  assert.equal(req.query.forceRefresh, true);
+  assert.ok(!req.query.snapshotId);
+  await send(req);
+  await frame.locator('#effort').fill('3');
+  await frame.locator('#estimate-form [type=submit]').click();
+  req = await next();
+  assert.equal(req.query.snapshotId, 'snapshot-fixture');
+  await frame.locator('#effort').fill('4');
+  await send(req);
+  await page.waitForTimeout(50);
+  assert.equal(await frame.locator('.candidate').count(), 0, 'dirty estimate rejects previous conclusions');
+  assert.equal(await frame.locator('#effort').inputValue(), '4');
+  await frame.locator('#estimate-form [type=submit]').click();
+  req = await next();
+  const updating = result(req.query);
+  updating.source.refreshing = true; updating.source.stale = true;
+  await send(req, updating);
+  req = await next();
+  assert.equal(req.query.refresh, true, 'one follow-up waits for background validation');
+  assert.equal(req.query.effort, 4);
+  await send(req, updating);
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => requests.length), count, 'no infinite polling');
+  await frame.locator('#refresh').click();
+  req = await next();
+  assert.equal(req.query.effort, 4, 'ordinary refresh retains temporary estimate');
+  const removed = result(req.query);
+  removed.tasks = removed.tasks.filter(t => t.id !== specialId); removed.taskId = null;
+  await send(req, removed);
+  req = await next();
+  assert.equal(req.query.taskId, 'record-2');
+  assert.equal(req.query.effort, null, 'removed task cannot transfer estimate');
+  await send(req);
+  await frame.locator('.candidate').waitFor();
+  await page.clock.install();
+  await frame.locator('#refresh').click(); req = await next();
+  await page.clock.runFor(130001);
+  assert.ok(await frame.locator('.candidate').isVisible(), 'timeout retains unexpired old conclusions');
+  assert.match(await frame.locator('.snapshot-notice').textContent(), /快照.*刷新失败.*超时/);
+  await send(req);
+  assert.match(await frame.locator('.snapshot-notice').textContent(), /超时/, 'late timed-out response ignored');
+  await frame.locator('#effort').fill('7');
+  await frame.locator('#refresh').click(); req = await next();
+  const reset = result({ ...req.query, effort: null });
+  reset.source.selectionReset = true;
+  reset.taskId = specialId;
+  await send(req, reset);
+  await frame.locator('.snapshot-notice').filter({ hasText: '快照' }).waitFor();
+  assert.equal(await frame.locator('#effort').inputValue(), '', 'selectionReset clears draft');
+  assert.equal(await frame.locator('#analysis-state').isVisible(), false);
+  await frame.locator('#refresh').click(); req = await next();
+  const failedBackground = result(req.query);
+  failedBackground.source.refreshError = '校验失败，请手动刷新';
+  failedBackground.source.stale = true;
+  await send(req, failedBackground);
+  await frame.locator('.snapshot-notice').filter({ hasText: '刷新失败' }).waitFor();
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => requests.length), count, 'background failure does not retry automatically');
+  await frame.locator('#refresh').click(); req = await next();
+  const expiring = result(req.query); expiring.source.expiresAt = await page.evaluate(() => new Date(Date.now() + 1000).toISOString());
+  await send(req, expiring);
+  await frame.locator('.candidate').waitFor();
+  await page.clock.runFor(2000);
+  assert.equal(await frame.locator('.candidate').count(), 0, 'expiry clears valid conclusions without another request');
+  assert.match(await frame.locator('#snapshot').textContent(), /已过期/);
+  await page.clock.resume();
+  await frame.locator('#refresh').click(); req = await next(); await send(req);
+  await frame.locator('.candidate').waitFor();
+  await frame.locator('#refresh').click(); req = await next();
+  await send(req, null, { error: '无权限', httpStatus: 403 });
+  await frame.locator('[data-action=retry]').waitFor();
+  assert.equal(await frame.locator('.candidate,.task-item').count(), 0, '403 clears all old content');
+  await page.close();
 }
 
 function modelChecks() {
-  assert.equal(M.version, "0.2.1");
+  assert.equal(M.version, "0.2.2");
+  assert.equal(M.expired({ source: { expiresAt: new Date(Date.now() - 1).toISOString() } }), true);
+  assert.equal(M.expired({ source: {} }), true, "missing expiry is never current analysis");
   assert.equal(M.effort(""), null);
   assert.equal(M.effort(null), null);
   for (const n of [0, -1, 40.01, Infinity, "bad"]) assert.throws(() => M.effort(n));
@@ -89,12 +194,13 @@ async function browserChecks() {
     page.on("pageerror", e => errors.push(e.message));
     page.on("request", r => { if (r.url().includes("/api/")) apiRequests.push(r.url()); });
     const base = `http://127.0.0.1:${server.address().port}`;
+    await refreshChecks(browser, base, output);
     await page.goto(`${base}/fixture`);
     const frame = page.frames().find(f => f.url().includes("embed=1"));
     const waitRequest = async count => { await page.waitForFunction(n => requests.length >= n, count); return page.evaluate(() => requests.at(-1)); };
     const send = async (request, payload = result(request.query), error) => page.evaluate(data => send(data), { type: "ea-assignment-reference-result", requestId: request.requestId, result: payload, error });
     let req = await waitRequest(1);
-    assert.deepEqual(req.query, { project: "all", role: "", taskId: "", effort: null, forceRefresh: false });
+    assert.deepEqual(req.query, { project: "all", role: "", taskId: "", effort: null, refresh: false, forceRefresh: false });
     await page.evaluate(() => send({ type: "ea-assignment-preview-context", project: "all", projects: ["目标项目"], theme: "ikki" }));
     await page.waitForTimeout(100);
     assert.equal(await page.evaluate(() => requests.length), 1, "duplicate context must not duplicate queries");
@@ -138,7 +244,7 @@ async function browserChecks() {
     await frame.locator('#estimate-form [type="submit"]').click();
     req = await waitRequest(2);
     assert.equal(req.query.effort, 2.5);
-    assert.deepEqual(Object.keys(req.query).sort(), ["effort", "forceRefresh", "project", "role", "taskId"]);
+    assert.deepEqual(Object.keys(req.query).sort(), ["effort", "forceRefresh", "project", "refresh", "role", "snapshotId", "taskId"]);
     assert.equal(await frame.locator(".candidate").count(), 0, "loading clears analysis");
     await send(req);
     await frame.locator(".candidate").waitFor();
@@ -158,8 +264,11 @@ async function browserChecks() {
     assert.equal(await page.evaluate(() => requests.length), 3, 'search and sort stay local');
     await frame.locator('[data-role="be"]').click();
     const older = await waitRequest(4);
+    assert.equal(older.query.snapshotId, 'snapshot-fixture', 'role switch pins full-table snapshot');
+    assert.equal(await frame.locator('.candidate').count(), 0, 'role switch hides previous context immediately');
     await page.evaluate(() => send({ type: "ea-assignment-preview-context", project: "新项目" }));
     req = await waitRequest(5);
+    assert.equal(req.query.snapshotId, 'snapshot-fixture', 'project switch can reuse full-table snapshot');
     assert.equal(await frame.locator('.task-item,.candidate').count(), 0, 'project change clears old data');
     await send(older);
     await page.waitForTimeout(50);
@@ -169,7 +278,8 @@ async function browserChecks() {
     assert.match(await frame.locator('#bridge-status').textContent(), /无权限/);
     await frame.locator('[data-action="retry"]').click();
     req = await waitRequest(6);
-    assert.equal(req.query.forceRefresh, true);
+    assert.equal(req.query.forceRefresh, false);
+    assert.equal(req.query.refresh, true);
     await send(req, null, '服务暂不可用');
     await frame.locator('[data-action="retry"]').waitFor();
     await frame.locator('[data-action="retry"]').click();
@@ -218,8 +328,8 @@ async function browserChecks() {
     }
     await frame.locator('#refresh').click();
     req = await waitRequest(10);
-    assert.equal(req.query.taskId, '', 'refresh must recover if a former task was assigned or removed');
-    assert.equal(req.query.effort, null, 'refresh cannot reuse an estimate for another task');
+    assert.equal(req.query.taskId, specialId, 'refresh preserves valid selection');
+    assert.equal(req.query.effort, null, 'unestimated selection remains unestimated');
     const large = result(req.query);
     large.candidates = Array.from({ length: 18 }, (_, n) => ({ ...large.candidates[0], id: `large-person-${n}`, name: `候选人${n + 1}`, items: Array.from({ length: 24 }, (_, i) => ({ ...large.candidates[0].items[0], id: `large-work-${i}`, title: `关联负载需求 ${i + 1}` })) }));
     await send(req, large);

@@ -4,7 +4,11 @@
   else root.AssignmentReference = model;
 })(typeof window === "object" ? window : globalThis, function () {
   "use strict";
-  const version = "0.2.1";
+  const version = "0.2.2";
+  function expired(result) {
+    const end = Date.parse(result?.source?.expiresAt);
+    return !Number.isFinite(end) || Date.now() >= end;
+  }
   const labels = { missing: "数据不足", conflict: "存在明确冲突", conditional: "有条件参考" };
   const itemRole = value => ({ fe: "前端", be: "后端", ui: "美术" })[value] || "岗位待核实";
   const itemSource = value => ({ formal_remaining: "正式剩余", unknown_reservation: "未量化预占", unknown: "来源待核实" })[value] || "来源待核实";
@@ -37,5 +41,5 @@
       && r.tasks.every(t => t && typeof t.id === "string" && (t.deadline === null || typeof t.deadline === "string") && Array.isArray(t.warnings))
       && r.candidates.every(p => p && typeof p.id === "string" && typeof p.name === "string" && Array.isArray(p.items) && p.items.every(item => item && typeof item.id === "string") && Array.isArray(p.reasons) && Array.isArray(p.dependencies));
   }
-  return { version, labels, html, number, date, snapshot, effort, visibleTasks, validResult, itemRole, itemSource };
+  return { version, labels, html, number, date, snapshot, effort, visibleTasks, validResult, itemRole, itemSource, expired };
 });

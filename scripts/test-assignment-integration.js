@@ -14,7 +14,7 @@ function fixture(url) {
     { id: "record-a", demandId: "001234", title: "真实需求甲", project, state: "待分配", type: "优化", summary: "需求总表真实内容", deadline: "2026-10-23", effort: null, warnings: [] },
     { id: "record-b", demandId: "001235", title: "真实需求乙", project, state: "待分配", type: "新功能", summary: "另一条需求", deadline: "2026-10-21", effort: null, warnings: [] }
   ];
-  return { ok: true, status: "ok", readOnly: true, version: "0.2.1", generatedAt: "2026-10-19T04:00:00.000Z",
+  return { ok: true, status: "ok", readOnly: true, version: "0.2.2", generatedAt: "2026-10-19T04:00:00.000Z",
     identity: { name: "页面验收组长", isFallback: true },
     roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "美术", field: "UI人员" }],
     role, tasks, taskId: tasks.length ? taskId : null,
@@ -23,7 +23,7 @@ function fixture(url) {
       unknownCount: 1, status: "missing", baseline: 0, gap: effort ? 1 : null, delta: effort ? 1 : null, quantified: Boolean(effort),
       reasons: ["存在未知预占工作量", "人员可分配资格未确认"], dependencies: ["UI完整交付未确认"],
       items: [{ id: "009999", title: "其他项目工作", project: "一骑当千", role: "后端", effort: 3, due: "2026-10-21", source: "正式剩余", reserved: false }]
-    }] : [], warnings: ["只读分析，不写回负责人"], source: { recordCount: 3802, cacheHit: true } };
+    }] : [], warnings: ["只读分析，不写回负责人"], source: { recordCount: 3802, cacheHit: true, snapshotId: "integration-snapshot", expiresAt: new Date(Date.now() + 900000).toISOString(), refreshing: false, stale: false } };
 }
 
 async function main() {
@@ -42,14 +42,14 @@ async function main() {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
     const errors = [], apiCalls = [];
-    let failNext = false;
+    let failNext = 0;
     page.on("pageerror", error => errors.push(error.message));
     await page.route("**/api/**", async route => {
       const req = route.request(), url = new URL(req.url());
       apiCalls.push({ method: req.method(), url: req.url(), child: req.frame().parentFrame() !== null });
       let payload;
       if (url.pathname.endsWith("assignment-reference")) {
-        if (failNext) { failNext = false; await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, message: "数据源暂不可用" }) }); return; }
+        if (failNext) { const status = failNext; failNext = 0; await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ ok: false, message: status === 403 ? "无权限查看该项目" : "数据源暂不可用" }) }); return; }
         payload = { ok: true, devProgress: fixture(url) };
       } else payload = url.pathname.includes("h5-session")
         ? { ok: true, identity: { name: "页面验收组长", source: "signed_session" } }
@@ -78,6 +78,27 @@ async function main() {
     await analysisResponse;
     await page.waitForTimeout(100);
     assert.equal(await frame.locator(".task-item").count(), 2, "analysis does not assign or remove a task");
+    let query = new URL(apiCalls.filter(c => c.url.includes('assignment-reference')).at(-1).url).searchParams;
+    assert.equal(query.get('snapshotId'), 'integration-snapshot');
+    const readResponse = () => page.waitForResponse(res => res.url().includes('assignment-reference'));
+    let response = readResponse();
+    await frame.locator('#refresh').click(); await response;
+    await page.waitForTimeout(50);
+    query = new URL(apiCalls.filter(c => c.url.includes('assignment-reference')).at(-1).url).searchParams;
+    assert.equal(query.get('refresh'), '1', 'ordinary refresh checks signal');
+    assert.equal(query.has('forceRefresh'), false);
+    assert.equal(query.has('snapshotId'), false);
+    assert.equal(query.get('effort'), '2');
+    response = readResponse();
+    await frame.locator('#force-refresh').click(); await response;
+    await page.waitForTimeout(50);
+    query = new URL(apiCalls.filter(c => c.url.includes('assignment-reference')).at(-1).url).searchParams;
+    assert.equal(query.get('forceRefresh'), '1');
+    assert.equal(query.has('snapshotId'), false);
+    failNext = 503; response = readResponse();
+    await frame.locator('#refresh').click(); await response;
+    await frame.locator('.snapshot-notice').filter({ hasText: '刷新失败' }).waitFor();
+    assert.ok(await frame.locator('.candidate').isVisible(), 'parent read failure retains old snapshot');
     await page.locator("#projectSelect").selectOption("魔王");
     await page.waitForTimeout(300);
     assert.equal(await frame.locator(".task-item").count(), 0);
@@ -100,8 +121,15 @@ async function main() {
         await page.screenshot({ path: path.join(output, "integrated-mobile.png"), fullPage: true });
       }
     }
+    failNext = 403;
+    await frame.locator('#refresh').click();
+    await frame.locator('[data-action=retry]').waitFor();
+    assert.equal(await frame.locator('.candidate,.task-item').count(), 0, 'parent relays 403 and child clears old content');
     assert.deepEqual(errors, []);
     assert.ok(apiCalls.every(c => c.method === "GET" && !c.child), "only parent reads APIs; no child API or write");
+    for (const call of apiCalls.filter(c => c.url.includes('assignment-reference'))) {
+      assert.ok([...new URL(call.url).searchParams.keys()].every(key => ['project', 'role', 'taskId', 'effort', 'refresh', 'forceRefresh', 'snapshotId'].includes(key)), 'fixed GET parameter whitelist');
+    }
     const loggedOut = await browser.newPage();
     await loggedOut.route("**/api/**", route => route.fulfill({ status: 401, contentType: "application/json", body: '{"ok":false}' }));
     await loggedOut.goto(`${base}/demand-h5.html?panel=assignment`);

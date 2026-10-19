@@ -45,7 +45,9 @@ const {
 } = require("./demandH5Session");
 
 const packageInfo = require("../../package.json");
+const { createDemandPageVersionReader } = require("./demandPageVersion");
 const staticDir = path.join(__dirname, "static");
+const readDemandPageVersion = createDemandPageVersionReader(staticDir);
 
 function contentType(filePath) {
   if (filePath.endsWith(".html")) {
@@ -121,6 +123,18 @@ function serveStatic(req, res) {
 
   if (!targetPath.startsWith(staticDir) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
     return false;
+  }
+
+  if (pathname === "/demand-h5.html") {
+    try {
+      const buildId = readDemandPageVersion();
+      const html = fs.readFileSync(targetPath, "utf8").replace("<head>", `<head>\n  <meta name="ea-page-build" content="${buildId}">`);
+      res.writeHead(200, { "Content-Type": contentType(targetPath), "Cache-Control": "no-store" });
+      res.end(html);
+    } catch (_) {
+      sendJson(res, 503, { ok: false, message: "页面正在更新，请稍后刷新" });
+    }
+    return true;
   }
 
   res.writeHead(200, {
@@ -2096,6 +2110,18 @@ function createAdminServer(options) {
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/dev-progress/page-version") {
+      const identity = requireDemandH5Identity(req, res, url.pathname);
+      if (!identity) return true;
+      try {
+        sendJson(res, 200, { ok: true, buildId: readDemandPageVersion(), appVersion: packageInfo.version });
+      } catch (_) {
+        logger.warn("Demand H5 page version unavailable", { reason: "asset_read_failed" });
+        sendJson(res, 503, { ok: false, message: "页面版本暂不可用" });
+      }
+      return true;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/dev-progress/assignment-reference") {
       const identity = requireDemandH5Identity(req, res, url.pathname);
       if (!identity) return true;
@@ -2106,6 +2132,8 @@ function createAdminServer(options) {
         role: url.searchParams.get("role") || "",
         taskId: url.searchParams.get("taskId") || "",
         effort: url.searchParams.get("effort"),
+        snapshotId: String(url.searchParams.get("snapshotId") || "").slice(0, 100),
+        refresh: url.searchParams.get("refresh") === "1",
         forceRefresh: url.searchParams.get("forceRefresh") === "1"
       });
       logger.info("Demand H5 assignment reference requested", {
@@ -2115,6 +2143,10 @@ function createAdminServer(options) {
         taskCount: result.tasks?.length || 0,
         candidateCount: result.candidates?.length || 0,
         cacheHit: Boolean(result.source?.cacheHit),
+        snapshotReused: Boolean(result.source?.snapshotReused),
+        reusedBySignal: Boolean(result.source?.reusedBySignal),
+        refreshing: Boolean(result.source?.refreshing),
+        stale: Boolean(result.source?.stale),
         readOnly: true,
         durationMs: Date.now() - startedAt
       });

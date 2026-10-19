@@ -31,6 +31,18 @@ async function main() {
   const session = createDemandH5Session({ userId: "test-leader", name: "真实组长" }, process.env.WECOM_DOC_SECRET);
   const cookie = `${COOKIE_NAME}=${encodeURIComponent(session.token)}`;
   try {
+    let pageRes = await fetch(`${base}/api/dev-progress/page-version`);
+    assert.equal(pageRes.status, 401);
+    pageRes = await fetch(`${base}/api/dev-progress/page-version`, { headers: { Cookie: cookie } });
+    assert.equal(pageRes.status, 200);
+    const build = await pageRes.json();
+    assert.match(build.buildId, /^[a-f0-9]{24}$/);
+    assert.equal(pageRes.headers.get("cache-control"), "no-store");
+    for (const entry of ["/demand-h5.html", "/demand", "/demand/"]) {
+      const html = await (await fetch(`${base}${entry}`)).text();
+      assert(html.includes(`<meta name="ea-page-build" content="${build.buildId}">`));
+    }
+    assert.equal(calls.length, 0, "page version never queries the source table");
     let res = await fetch(`${base}/api/dev-progress/assignment-reference?userName=王谦`);
     assert.equal(res.status, 401);
     assert.equal(calls.length, 0, "authentication happens before reader");
@@ -41,12 +53,18 @@ async function main() {
     const payload = await res.json();
     assert.equal(payload.devProgress.readOnly, true);
     assert.equal(res.headers.get("cache-control"), "no-store");
-    assert.deepEqual(calls[0], { userName: "真实组长", role: "fe", project: "恶魔高校", taskId: "r1", effort: "2", forceRefresh: false });
+    assert.deepEqual(calls[0], { userName: "真实组长", role: "fe", project: "恶魔高校", taskId: "r1", effort: "2", snapshotId: "", refresh: false, forceRefresh: false });
+    res = await fetch(`${base}/api/dev-progress/assignment-reference?refresh=1&forceRefresh=1&snapshotId=some-snapshot&userName=spoof`, { headers: { Cookie: cookie } });
+    assert.equal(res.status, 200);
+    assert.equal(calls[1].userName, "真实组长");
+    assert.equal(calls[1].refresh, true);
+    assert.equal(calls[1].forceRefresh, true);
+    assert.equal(calls[1].snapshotId, "some-snapshot");
     res = await fetch(`${base}/api/dev-progress/assignment-reference?role=be`, { headers: { Cookie: cookie } });
     assert.equal(res.status, 403);
     res = await fetch(`${base}/api/dev-progress/assignment-reference`, { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: '{"owner":"Fake"}' });
     assert.notEqual(res.status, 200, "no assignment mutation route exists");
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.ok(logs.some(item => item.event === "Demand H5 assignment reference requested" && item.details.readOnly));
     console.log("Assignment API passed: session required, spoofed identity ignored, role denial, GET-only, no-store, audit metadata.");
   } finally {

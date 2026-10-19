@@ -11,8 +11,8 @@
     // The sandbox deliberately has an opaque origin. Only this frame gets UI context.
     frame.contentWindow.postMessage({ type: "ea-assignment-preview-context", ...context }, "*");
   }
-  function sendResult(requestId, result, error) {
-    frame.contentWindow?.postMessage({ type: "ea-assignment-reference-result", requestId, result, error }, "*");
+  function sendResult(requestId, result, error, httpStatus) {
+    frame.contentWindow?.postMessage({ type: "ea-assignment-reference-result", requestId, result, error, httpStatus }, "*");
   }
   async function requestReference(data) {
     if (typeof data.requestId !== "string" || data.requestId.length > 100) return;
@@ -25,7 +25,9 @@
       if (value !== undefined && value !== null && typeof value !== "object") params.set(key, String(value).slice(0, 200));
     }
     params.set("project", context.project || "all");
+    if (query.refresh === true) params.set("refresh", "1");
     if (query.forceRefresh === true) params.set("forceRefresh", "1");
+    if (!query.refresh && !query.forceRefresh && typeof query.snapshotId === "string") params.set("snapshotId", query.snapshotId.slice(0, 200));
     if (activeRequest) activeRequest.abort();
     const controller = new AbortController();
     activeRequest = controller;
@@ -33,12 +35,17 @@
     try {
       const response = await fetch(`/api/dev-progress/assignment-reference?${params}`, {
         cache: "no-store", credentials: "same-origin", signal: controller.signal,
-        headers: { "X-EA-Demand-Page-Version": "assignment-0.2.1" }
+        headers: { "X-EA-Demand-Page-Version": "assignment-0.2.2" }
       });
-      const payload = await response.json();
+      let payload;
+      try { payload = await response.json(); }
+      catch (_) {
+        if (activeRequest === controller) sendResult(data.requestId, null, `请求失败：HTTP ${response.status}`, response.status);
+        return;
+      }
       if (activeRequest !== controller) return;
       if (!response.ok || !payload.ok) {
-        sendResult(data.requestId, null, payload.message || `请求失败：HTTP ${response.status}`);
+        sendResult(data.requestId, null, payload.message || `请求失败：HTTP ${response.status}`, response.status);
         return;
       }
       sendResult(data.requestId, payload.devProgress);

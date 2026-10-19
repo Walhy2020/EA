@@ -1,10 +1,11 @@
 {
   "name": "eazygame-integrated-assistant",
-  "version": "0.7.21",
+  "version": "0.7.22",
   "private": true,
   "description": "Unified WeCom smart robot entry and local admin console for EazyGame operations.",
   "main": "src/main.js",
   "scripts": {
+    "test:demand-page-update": "node scripts/test-demand-page-update.js",
     "test:assignment-reference": "node scripts/test-assignment-reference.js && node scripts/test-assignment-api.js && node scripts/test-assignment-calendar.js",
     "test:assignment-ui": "node scripts/test-assignment-preview.js && node scripts/test-assignment-integration.js",
     "start": "node src/main.js",

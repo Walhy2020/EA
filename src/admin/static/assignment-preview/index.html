@@ -6,17 +6,17 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>分配参考 · EA 需求进度管理</title>
   <link rel="icon" href="./assets/ea.png">
-  <link rel="stylesheet" href="./styles.css?v=0.2.1">
+  <link rel="stylesheet" href="./styles.css?v=0.2.2">
   <script src="./assets/lucide.min.js" defer></script>
-  <script src="./model.js?v=0.2.1" defer></script>
-  <script src="./app.js?v=0.2.1" defer></script>
+  <script src="./model.js?v=0.2.2" defer></script>
+  <script src="./app.js?v=0.2.2" defer></script>
 </head>
 <body>
   <header class="app-header">
     <div class="brand"><img src="./assets/ea.png" width="38" height="38" alt="EA"><div><span class="eyebrow">EA 系统</span><h1>需求进度管理</h1></div></div>
-    <div class="header-right"><span class="preview-tag">分配参考 <span>v0.2.1</span></span></div>
+    <div class="header-right"><span class="preview-tag">分配参考 <span>v0.2.2</span></span></div>
   </header>
-  <div class="preview-strip"><span><i data-lucide="lock-keyhole"></i>只读 · 不写回，不发送通知</span><span id="bridge-status" role="status"></span><button id="refresh" class="icon-button" title="刷新查询 / 重试" aria-label="刷新查询 / 重试"><i data-lucide="refresh-cw"></i></button></div>
+  <div class="preview-strip"><span><i data-lucide="lock-keyhole"></i>只读 · 不写回，不发送通知</span><span id="bridge-status" role="status"></span><button id="refresh" class="icon-button" title="检查数据变化" aria-label="检查数据变化"><i data-lucide="refresh-cw"></i></button><button id="force-refresh" class="icon-button" title="强制重新读取总表" aria-label="强制重新读取总表"><i data-lucide="database-backup"></i></button></div>
   <main class="app-shell">
     <section class="context-bar" aria-label="项目与数据时间">
       <span class="project-select"><i data-lucide="layers-2"></i>分配参考</span>
@@ -31,7 +31,7 @@
       </aside>
       <section id="detail-pane" class="detail-pane" aria-label="人员分配分析"><div id="task-detail"></div></section>
     </div>
-    <footer class="page-footer"><span>EA · 分配参考</span><span>v0.2.1 · 只读</span></footer>
+    <footer class="page-footer"><span>EA · 分配参考</span><span>v0.2.2 · 只读</span></footer>
   </main>
   <dialog id="confirm-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>

@@ -2134,6 +2134,7 @@ function createDevProgressModule(options = {}) {
     readFieldDefinitions: fieldDefinitionsReader,
     readWorkdayCalendar: workdayCalendarReader,
     readRecords: recordsReader,
+    readDocumentInfo: documentInfoReader,
     resolveProjectName: (name, settings) => resolveProjectAlias(name, settings)?.projectName || name,
     nowMs: nowMsProvider,
     logger
@@ -4186,7 +4187,7 @@ function createDevProgressModule(options = {}) {
     const settings = settingsProvider();
     return {
       version: DEV_PROGRESS_MODULE_VERSION,
-      assignmentReference: { version: "0.2.1", readOnly: true },
+      assignmentReference: { version: "0.2.2", readOnly: true },
       enabled: Boolean(settings.enabled),
       source: settings.source,
       ready: Boolean(settings.ready),

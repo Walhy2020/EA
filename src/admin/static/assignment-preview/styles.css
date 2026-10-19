@@ -39,6 +39,11 @@ body.host-embedded { background: transparent; }
 .status.conditional { color: var(--amber); }
 .data-warnings { color: var(--amber); font-size: 12px; overflow-wrap: anywhere; margin-top: 10px; }
 .data-warnings:empty { display: none; }
+.snapshot-notice { font-size: 12px; margin-top: 12px; padding: 9px 12px; border-left: 3px solid #87958b; background: #f2f6f3; color: #354c3c; overflow-wrap: anywhere; }
+.snapshot-stale .snapshot-notice { border-color: #b45309; background: #fff4db; color: #78350f; font-weight: 600; }
+.snapshot-stale #snapshot { color: #92400e; font-weight: 600; }
+.snapshot { overflow-wrap: anywhere; min-width: 0; }
+.preview-strip .icon-button { flex-shrink: 0; }
 .preview-strip { flex-wrap: wrap; }
 #bridge-status { flex: 1; justify-content: flex-end; overflow-wrap: anywhere; }
 .detail-title h2,.task-description,.task-meta dd,.dialog-body,.comparison strong { overflow-wrap: anywhere; min-width: 0; }

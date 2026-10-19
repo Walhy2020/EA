@@ -1432,3 +1432,30 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+.page-update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid #92bddd;
+  border-radius: 6px;
+  background: #edf6fc;
+  color: #17384e;
+  font-size: 14px;
+}
+
+.page-update-notice[hidden] { display: none; }
+.page-update-actions { display: flex; flex-shrink: 0; gap: 12px; }
+.page-update-actions button {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: #145b92;
+  font: inherit;
+  cursor: pointer;
+}
+.page-update-actions button:first-child { font-weight: 600; }
+.page-update-actions button:focus-visible { outline: 2px solid #145b92; outline-offset: 3px; }

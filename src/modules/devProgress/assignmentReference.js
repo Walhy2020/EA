@@ -1,6 +1,10 @@
 "use strict";
 
-const VERSION = "0.2.1";
+const { randomUUID } = require("node:crypto");
+const VERSION = "0.2.2";
+const FRESH_MS = 60000;
+const PIN_MS = 5 * 60000;
+const MAX_AGE_MS = 15 * 60000;
 const ROLES = [
   { id: "fe", name: "前端", field: "前端开发", total: "前端耗时", remaining: "前端剩余", owner: "frontend", due: "开发截止日期", leader: "前端组长" },
   { id: "be", name: "后端", field: "后端开发", total: "后端耗时", remaining: "后端剩余", owner: "backend", due: "开发截止日期", leader: "后端组长" },
@@ -78,8 +82,11 @@ function roleConfig(settings, workflow, role) {
 
 // Readers use the original client convention: readRecords(settings, options).
 // This service never writes source records, files, or notifications.
-function createAssignmentReferenceService({ getSettings, getWorkflowRulesSettings, readFieldDefinitions, readRecords, readWorkdayCalendar, resolveProjectName = (name) => name, nowMs = Date.now, logger } = {}) {
+function createAssignmentReferenceService({ getSettings, getWorkflowRulesSettings, readFieldDefinitions, readRecords, readWorkdayCalendar, readDocumentInfo, resolveProjectName = (name) => name, nowMs = Date.now, logger } = {}) {
   let cached = null;
+  let activeKey = null;
+  let generation = 0;
+  const snapshots = new Map();
   const inflight = new Map();
   let activeReads = 0;
   const waitingReads = [];
@@ -93,10 +100,27 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
       else activeReads--;
     }
   }
-  async function load(settings, key, forceRefresh) {
-    if (inflight.has(key)) return { data: await inflight.get(key), cacheHit: false, sharedInflight: true };
-    if (!forceRefresh && cached?.key === key && nowMs() - cached.at < 60000) return { data: cached.data, cacheHit: true, sharedInflight: false };
-    const promise = (async () => {
+  const usable = (entry, key) => entry?.key === key && nowMs() - entry.readAt < MAX_AGE_MS;
+  function reply(entry, extra = {}) {
+    return { data: entry.data, cacheHit: true, sharedInflight: false, snapshotId: entry.id,
+      verifiedAt: new Date(entry.checkedAt).toISOString(),
+      expiresAt: new Date(entry.readAt + MAX_AGE_MS).toISOString(),
+      stale: cached !== entry || nowMs() - entry.checkedAt >= FRESH_MS || Boolean(entry.refreshError),
+      refreshing: false, refreshError: entry.refreshError || "", snapshotReused: false, reusedBySignal: false, ...extra };
+  }
+  async function signal(settings) {
+    if (typeof readDocumentInfo !== "function") return null;
+    try {
+      const info = await readDocumentInfo(settings);
+      const result = info?.ok && str(info.modifyTime) && str(info.signal) ? str(info.signal) : null;
+      if (!result) logger?.info?.("assignment_reference_signal_unavailable", { reason: "missing_or_invalid_metadata" });
+      return result;
+    } catch (_) {
+      logger?.info?.("assignment_reference_signal_unavailable", { reason: "metadata_read_failed" });
+      return null;
+    }
+  }
+  async function readSnapshot(settings, key, beforeSignal, epoch) {
       const schema = await readFieldDefinitions(settings);
       if (!schema?.ok) throw new ReadError("无法读取真实字段定义");
       const titles = new Set(schema.fieldTitles || schema.fields?.map((f) => f.title) || []);
@@ -146,16 +170,71 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
       if (!done || (expected !== null && expected !== records.length)) throw new ReadError("记录不完整或超过10000上限");
       const ids = records.map((r) => str(r.recordId || r.id));
       if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new ReadError("记录主键缺失或分页重复");
-      const calendar = await readWorkdayCalendar(settings, { forceRefresh: Boolean(forceRefresh), utcOffsetMinutes: 480 });
+      const calendar = await readWorkdayCalendar(settings, { forceRefresh: true, utcOffsetMinutes: 480 });
+      const afterSignal = await signal(settings);
+      if (beforeSignal && afterSignal && beforeSignal !== afterSignal) throw new ReadError("读取期间总表发生变化，请刷新重试");
       const completedAt = nowMs();
       const data = { records, calendar, pages, fieldTitles, generatedAt: new Date(completedAt).toISOString() };
-      cached = { key, at: completedAt, data };
+      const entry = { id: randomUUID(), key, readAt: completedAt, checkedAt: completedAt, signal: beforeSignal && beforeSignal === afterSignal ? afterSignal : null, data, refreshError: "" };
+      if (activeKey === key && generation === epoch) {
+        cached = entry;
+        snapshots.set(entry.id, entry);
+        for (const [id, old] of snapshots) if (!usable(old, key)) snapshots.delete(id);
+        while (snapshots.size > 3) snapshots.delete(snapshots.keys().next().value);
+      }
       logger?.info?.("assignment_reference_read", { recordCount: records.length, pageCount: pages, fieldCount: fieldTitles.length });
-      return data;
+      return reply(entry, { cacheHit: false });
+  }
+  async function update(settings, key, forceFull) {
+    const epoch = generation;
+    const workKey = JSON.stringify([epoch, key]);
+    const running = inflight.get(workKey);
+    if (running) {
+      const result = await running.promise;
+      if (forceFull && !running.forceFull && result.reusedBySignal) return update(settings, key, true);
+      return { ...result, sharedInflight: true };
+    }
+    const promise = (async () => {
+      const current = cached;
+      const beforeSignal = await signal(settings);
+      if (!forceFull && activeKey === key && generation === epoch && usable(current, key) && beforeSignal && current.signal === beforeSignal) {
+        current.checkedAt = nowMs();
+        current.refreshError = "";
+        logger?.info?.("assignment_reference_signal_unchanged", { recordCount: current.data.records.length, ageMs: nowMs() - current.readAt });
+        return reply(current, { reusedBySignal: true });
+      }
+      logger?.info?.("assignment_reference_refresh_started", { reason: forceFull ? "forced" : !usable(current, key) ? "cold_or_expired" : !beforeSignal || !current.signal ? "signal_unavailable" : "document_changed" });
+      return readSnapshot(settings, key, beforeSignal, epoch);
     })();
-    inflight.set(key, promise);
-    try { return { data: await promise, cacheHit: false, sharedInflight: false }; }
-    finally { inflight.delete(key); }
+    inflight.set(workKey, { promise, forceFull });
+    try { return await promise; }
+    catch (error) {
+      if (activeKey === key && generation === epoch && usable(cached, key)) {
+        cached.refreshError = "刷新失败，当前显示旧快照";
+        cached.failureAt = nowMs();
+      }
+      throw error;
+    } finally { inflight.delete(workKey); }
+  }
+  async function load(settings, key, input) {
+    if (activeKey !== key) {
+      activeKey = key;
+      generation++;
+      cached = null;
+      snapshots.clear();
+    }
+    if (!input.refresh && !input.forceRefresh) {
+      const pinned = snapshots.get(str(input.snapshotId));
+      if (usable(pinned, key) && nowMs() - pinned.checkedAt < PIN_MS) return reply(pinned, { snapshotReused: true });
+      if (usable(cached, key)) {
+        if (nowMs() - cached.checkedAt < FRESH_MS || (cached.refreshError && nowMs() - cached.failureAt < 30000)) return reply(cached);
+        const previous = cached;
+        // The next explicit refresh joins this promise; background errors are always handled.
+        update(settings, key, false).catch(() => logger?.warn?.("assignment_reference_background_refresh_failed", { reason: "read_failed" }));
+        return reply(previous, { refreshing: true, stale: true });
+      }
+    }
+    return update(settings, key, Boolean(input.forceRefresh));
   }
 
   async function query(input = {}) {
@@ -179,16 +258,17 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
       const role = input.role ? allowed.find((r) => r.id === input.role) : allowed[0];
       if (!role) return fail("forbidden", "无权查询该岗位", 403);
       base.role = role.id;
-      const effort = input.effort == null || str(input.effort) === "" ? null : number(input.effort);
+      let effort = input.effort == null || str(input.effort) === "" ? null : number(input.effort);
       if (input.effort != null && str(input.effort) !== "" && (effort === null || !Number.isFinite(effort) || effort <= 0 || effort > 40)) return fail("invalid_effort", "粗估必须大于0且不超过40人日", 400);
       if (settings.enabled !== true) return fail("disabled", "需求进度模块未启用，暂不可读取", 503);
       if (settings.ready !== true) return fail("not_ready", "需求进度数据源配置未就绪，暂不可读取", 503);
       // Bind the cache to all reader settings (including doc/sheet/view/mapping).
       const key = JSON.stringify(stable(settings));
-      const loaded = await load(settings, key, Boolean(input.forceRefresh));
+      const loaded = await load(settings, key, input);
       const { records, calendar, pages, fieldTitles } = loaded.data;
       base.generatedAt = loaded.data.generatedAt;
-      base.source = { recordCount: records.length, cacheHit: loaded.cacheHit, sharedInflight: loaded.sharedInflight, pageCount: pages, fieldTitles, complete: true, metric: "known_deadline_capacity_lower_bound" };
+      const { data: _, ...cacheMeta } = loaded;
+      base.source = { ...cacheMeta, recordCount: records.length, pageCount: pages, fieldTitles, complete: true, metric: "known_deadline_capacity_lower_bound" };
       const days = [...new Set((calendar?.dates || []).map(date).filter(Boolean))].sort();
       const invalidCalendar = (calendar?.dates || []).some((d) => !date(d));
       base.calendar = { ok: Boolean(calendar?.ok && days.length && !invalidCalendar), firstDate: days[0] || null, lastDate: days.at(-1) || null, today: base.calendar.today, workdays: days };
@@ -203,6 +283,13 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
         && participates(r, role) && !str(value(r, role.field)) && (!project || projectKey(value(r, "项目")) === targetProject));
       base.source.projectFilter = { requested: project, canonical: targetProject };
       logger?.info?.("assignment_reference_filtered", { role: role.id, project, canonicalProject: targetProject, recordCount: records.length, taskCount: eligible.length, cacheHit: loaded.cacheHit });
+      let selected = input.taskId ? eligible.find((r) => str(r.recordId || r.id) === str(input.taskId)) : eligible[0];
+      if (input.taskId && !selected) {
+        if (!input.refresh && !input.forceRefresh) return fail("task_unavailable", "需求不在当前岗位和项目的可分配池中", 404);
+        selected = eligible[0];
+        effort = null;
+        base.source.selectionReset = true;
+      }
       base.tasks = eligible.map((r) => {
         const warnings = [];
         if (!str(value(r, "需求名称"))) warnings.push("需求名称缺失");
@@ -214,8 +301,6 @@ function createAssignmentReferenceService({ getSettings, getWorkflowRulesSetting
         if (/bug/i.test(str(value(r, "需求类型"))) && effort === null) warnings.push("Bug无人工粗估，不作新增工作量精算");
         return { id: str(r.recordId || r.id), demandId: str(value(r, "需求Id")), title: str(value(r, "需求名称")), project: str(resolveProjectName(str(value(r, "项目")), settings)), state: "待分配", type: str(value(r, "需求类型")), summary: str(value(r, "需求内容")), deadline, effort: null, warnings };
       });
-      const selected = input.taskId ? eligible.find((r) => str(r.recordId || r.id) === str(input.taskId)) : eligible[0];
-      if (input.taskId && !selected) return fail("task_unavailable", "需求不在当前岗位和项目的可分配池中", 404);
       if (!selected) return { ...base, ok: true, status: "ok", message: "当前没有待分配需求" };
       base.taskId = str(selected.recordId || selected.id);
 

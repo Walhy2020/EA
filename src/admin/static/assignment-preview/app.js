@@ -10,6 +10,12 @@
   let pendingId = null;
   let sequence = 0;
   let timer;
+  let expiryTimer;
+  let snapshotId = "";
+  let pendingQuery;
+  let draftVersion = 0;
+  let pendingDraft;
+  let waitingOnce = false;
   let contextReceived = false;
   let dialogReturnTarget;
   document.body.classList.toggle("host-embedded", embedded);
@@ -24,33 +30,62 @@
   const people = () => state.result?.candidates || [];
   const lines = values => values.map(value => `<p>${html(value)}</p>`).join("");
   const back = () => `<button class="mobile-back text-button" data-action="back">${icon("arrow-left")}需求列表</button>`;
-  function fail(message) {
+  function fail(message, status) {
     clearTimeout(timer);
     pendingId = null;
-    state.result = null;
+    if (status === 401 || status === 403) {
+      state.result = null; state.tasks = []; state.roles = []; state.taskId = "";
+      state.effort = ""; snapshotId = ""; clearTimeout(expiryTimer);
+      if ($("#confirm-dialog").open) closeDialog();
+    }
     state.phase = "error";
     state.message = message;
     render();
   }
-  function request(forceRefresh = false) {
+  function request(options = {}) {
     if (!embedded) return;
     const effort = M.effort(state.effort);
+    const query = { project: state.project, role: state.role, taskId: state.taskId, effort, refresh: Boolean(options.refresh), forceRefresh: Boolean(options.forceRefresh) };
+    if (!query.refresh && !query.forceRefresh && snapshotId) query.snapshotId = snapshotId;
+    if (pendingId && JSON.stringify(query) === JSON.stringify(pendingQuery) && pendingDraft === draftVersion) return;
     clearTimeout(timer);
     pendingId = `assignment-${Date.now()}-${++sequence}`;
-    state.result = null;
+    pendingQuery = query; pendingDraft = draftVersion; waitingOnce = Boolean(options.followup);
     state.phase = "loading";
-    state.message = "正在查询和分析…";
-    state.dirty = false;
-    state.expanded = null;
+    state.message = state.result ? "正在后台更新" : "正在查询和分析…";
     render();
-    const query = { project: state.project, role: state.role, taskId: state.taskId, effort, forceRefresh: Boolean(forceRefresh) };
     window.parent.postMessage({ type: "ea-assignment-reference-request", requestId: pendingId, query }, "*");
     timer = setTimeout(() => fail("查询超时，请重试"), REQUEST_TIMEOUT_MS);
+  }
+  function clearAnalysis() {
+    state.result = null; state.expanded = null; state.dirty = false;
+    clearTimeout(expiryTimer);
+    if ($("#confirm-dialog").open) closeDialog();
+  }
+  function armExpiry() {
+    clearTimeout(expiryTimer);
+    if (!state.result || M.expired(state.result)) return;
+    expiryTimer = setTimeout(() => {
+      if ($("#confirm-dialog").open) closeDialog();
+      render();
+    }, Math.min(2147483647, Date.parse(state.result.source.expiresAt) - Date.now() + 1));
+  }
+  function snapshotStatus() {
+    if (!state.result) return state.message;
+    const source = state.result.source || {};
+    const status = [];
+    if (M.expired(state.result)) status.push("已过期 · 分析不可用");
+    if (state.phase === "loading" || (source.refreshing && state.phase !== "error")) status.push("旧快照 · 正在后台更新");
+    if (state.phase === "error" || source.refreshError) status.push(`旧快照 · 刷新失败：${state.phase === "error" ? state.message : source.refreshError}`);
+    else if (source.stale) status.push("旧快照 · 尚未验证最新");
+    return [M.snapshot(state.result.generatedAt), ...status].join(" · ");
   }
   function selectTask(id, mobile = false) {
     if (!state.tasks.some(t => t.id === id)) return;
     if (mobile) $("#assign-view").classList.add("show-detail");
     if (state.taskId === id && state.phase === "ready") return;
+    if (state.taskId === id && pendingId) return;
+    clearAnalysis();
     state.taskId = id;
     state.effort = "";
     request();
@@ -88,10 +123,10 @@
     const t = task();
     if (!embedded) {
       $("#task-detail").innerHTML = '<div class="empty-state"><h3>请从需求工作台进入</h3><a class="text-button" href="/demand-h5.html?panel=assignment">进入分配参考</a></div>';
-    } else if (state.phase !== "ready") {
+    } else if (!state.result && state.phase !== "ready") {
       $("#task-detail").innerHTML = `${back()}<div class="empty-state" role="status"><h3>${html(state.message)}</h3>${state.phase === "error" ? '<button class="secondary-button" data-action="retry">重试</button>' : ""}</div>`;
     } else if (!t) $("#task-detail").innerHTML = `${back()}<div class="empty-state"><h3>暂无可分析需求</h3></div>`;
-    else $("#task-detail").innerHTML = `${header(t)}<div class="data-warnings">${lines([...(t.warnings || []), ...(state.result.warnings || [])])}</div><div class="candidate-table" aria-label="可行性分析"><div class="candidate-table-head"><span>候选人 / 所属组长</span><span>已知负载</span><span>已知预占</span><span>加入新任务后的影响</span><span>依据</span></div><div id="candidate-results">${people().map(candidate).join("") || '<div class="empty-state">暂无候选人分析</div>'}</div></div><div class="results-foot"><span>${icon("info")}容量下界不代表联合排期可行</span><span>只读分析</span></div>`;
+    else $("#task-detail").innerHTML = `${header(t)}<div class="snapshot-notice" role="status">${html(snapshotStatus())}</div><div class="data-warnings">${lines([...(t.warnings || []), ...(state.result.warnings || [])])}</div><div class="candidate-table" aria-label="可行性分析"><div class="candidate-table-head"><span>候选人 / 所属组长</span><span>已知负载</span><span>已知预占</span><span>加入新任务后的影响</span><span>依据</span></div><div id="candidate-results">${state.dirty ? '<div class="empty-state">待重新分析</div>' : M.expired(state.result) ? '<div class="empty-state">快照已过期，请刷新后查看分析</div>' : people().map(candidate).join("") || '<div class="empty-state">暂无候选人分析</div>'}</div></div><div class="results-foot"><span>${icon("info")}容量下界不代表联合排期可行</span><span>只读分析</span></div>`;
   }
   function render() {
     $("#role-tabs").innerHTML = state.roles.map(r => `<button data-role="${html(r.id)}" class="${state.role === r.id ? "active" : ""}" aria-pressed="${state.role === r.id}">${html(r.name)}</button>`).join("");
@@ -103,12 +138,15 @@
     }
     $("#identity-name").textContent = state.result?.identity?.name || "身份待确认";
     $("#identity-name").title = state.result?.identity?.isFallback ? "兜底人" : "";
-    $("#snapshot").textContent = state.phase === "ready" ? M.snapshot(state.result?.generatedAt) : state.message;
-    $("#bridge-status").textContent = embedded ? state.phase === "ready" ? M.snapshot(state.result?.generatedAt) : state.message : "请从需求工作台进入";
+    $("#snapshot").textContent = snapshotStatus();
+    $("#bridge-status").textContent = embedded ? snapshotStatus() : "请从需求工作台进入";
     $("#refresh").disabled = !embedded || state.phase === "loading";
+    $("#force-refresh").disabled = !embedded || state.phase === "loading";
+    document.body.classList.toggle("snapshot-stale", Boolean(state.result && (M.expired(state.result) || state.phase !== "ready" || state.result.source?.stale || state.result.source?.refreshing || state.result.source?.refreshError)));
     renderTasks(); renderDetail(); icons();
   }
   function markDirty() {
+    draftVersion++;
     state.dirty = true;
     $("#analysis-state").hidden = false;
     // Hide previous conclusions until the server analyzes the new estimate.
@@ -139,19 +177,18 @@
   document.addEventListener("click", event => {
     const b = event.target.closest("button");
     if (!b) return;
+    if ((b.dataset.evidence || b.dataset.evidenceTab || b.dataset.work) && (state.dirty || M.expired(state.result))) { renderDetail(); icons(); return; }
     if (b.dataset.task) selectTask(b.dataset.task, true);
     if (b.dataset.role && b.dataset.role !== state.role && state.roles.some(r => r.id === b.dataset.role)) {
+      clearAnalysis();
       state.role = b.dataset.role; state.taskId = ""; state.effort = ""; state.tasks = []; request();
     }
     if (b.dataset.evidence) { state.expanded = state.expanded === b.dataset.evidence ? null : b.dataset.evidence; state.tab = "load"; renderDetail(); icons(); }
     if (b.dataset.evidenceTab) { state.tab = b.dataset.evidenceTab; renderDetail(); icons(); }
     if (b.id === "time-sort") { state.order = state.order === "asc" ? "desc" : "asc"; renderTasks(); icons(); }
-    if (b.id === "refresh" || b.dataset.action === "retry") {
-      state.taskId = "";
-      state.effort = "";
-      state.tasks = [];
-      try { request(true); }
-      catch (error) { $("#estimate-error").textContent = error.message; $("#estimate-error").hidden = false; }
+    if (b.id === "refresh" || b.id === "force-refresh" || b.dataset.action === "retry") {
+      try { request({ refresh: b.id !== "force-refresh", forceRefresh: b.id === "force-refresh" }); }
+      catch (error) { if ($("#estimate-error")) { $("#estimate-error").textContent = error.message; $("#estimate-error").hidden = false; } }
     }
     if (b.dataset.action === "back") $("#assign-view").classList.remove("show-detail");
     if (b.dataset.action === "clear-filter") { state.search = ""; $("#search").value = ""; renderTasks(); icons(); }
@@ -176,6 +213,7 @@
     if (!changed && !first) return;
     if (!changed && state.phase !== "waiting") return;
     state.project = project; state.projects = projects; state.taskId = ""; state.role = ""; state.effort = ""; state.tasks = []; state.roles = [];
+    clearAnalysis();
     state.search = ""; $("#search").value = "";
     if ($("#confirm-dialog").open) closeDialog();
     request();
@@ -186,21 +224,32 @@
     if (data?.type === "ea-assignment-preview-context") { applyContext(data); return; }
     if (data?.type !== "ea-assignment-reference-result" || !pendingId || data.requestId !== pendingId) return;
     const r = data.result;
-    if (data.error || !r?.ok) { fail(String(data.error || r?.message || "查询失败，请重试")); return; }
+    if (data.error || !r?.ok) { fail(String(data.error || r?.message || "查询失败，请重试"), data.httpStatus || r?.httpStatus); return; }
     if (!M.validResult(r)) { fail("返回数据格式不正确，请重试"); return; }
     clearTimeout(timer); pendingId = null;
+    snapshotId = typeof r.source?.snapshotId === "string" ? r.source.snapshotId : "";
     state.roles = r.roles; state.tasks = r.tasks; state.role = r.role;
-    if (!r.roles.some(role => role.id === r.role) && r.tasks.length) { fail("当前岗位不可用"); return; }
+    if (!r.roles.some(role => role.id === r.role) && r.tasks.length) { clearAnalysis(); fail("当前岗位不可用"); return; }
     const visible = M.visibleTasks(r.tasks, allowed(), "", state.order);
     const selected = visible.find(t => t.id === r.taskId);
+    if (r.source?.selectionReset) {
+      clearAnalysis(); state.effort = "";
+    }
+    if (!r.source?.selectionReset && pendingQuery.taskId && (!visible.some(t => t.id === pendingQuery.taskId) || (selected && selected.id !== pendingQuery.taskId))) {
+      clearAnalysis(); state.taskId = visible[0]?.id || ""; state.effort = "";
+      if (visible.length) { request({ followup: waitingOnce }); return; }
+    }
     if (!selected && visible.length) {
       if (state.taskId === visible[0].id) { fail("目标需求分析不可用，请重试"); return; }
-      state.taskId = visible[0].id; state.effort = ""; request(); return;
+      clearAnalysis(); state.taskId = visible[0].id; state.effort = ""; request({ followup: waitingOnce }); return;
     }
     state.taskId = selected?.id || "";
     state.result = { ...r, candidates: selected ? r.candidates : [] };
+    state.dirty = !r.source?.selectionReset && pendingDraft !== draftVersion;
     state.phase = "ready"; state.message = r.message || "查询完成";
     render();
+    armExpiry();
+    if (r.source?.refreshing && !r.source.refreshError && !waitingOnce && !state.dirty) request({ refresh: true, followup: true });
   }
   if (embedded) {
     window.addEventListener("message", receive);

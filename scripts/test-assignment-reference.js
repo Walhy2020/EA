@@ -22,6 +22,7 @@ function fixture(rows = [record(1)], overrides = {}, factory = createAssignmentR
   const service = factory({ getSettings: () => settings, getWorkflowRulesSettings: () => workflow,
     nowMs: () => time, readFieldDefinitions: async () => ({ ok: true, fields: FIELDS.map((title) => ({ title })) }),
     readWorkdayCalendar: async () => ({ ok: true, dates: DAYS }),
+    readDocumentInfo: async () => ({ ok: false }),
     readRecords: async (s, o) => {
       assert.equal(s.docid, settings.docid);
       assert(o.fieldTitles.includes("前端剩余"));
@@ -55,7 +56,7 @@ test("same-role leaders see the whole pool including other groups", async () => 
   const b = await query(f, { userName: "L2" });
   assert.deepEqual(a.candidates.map((c) => c.name).sort(), ["Alice", "Bob", "Carol"]);
   assert.deepEqual(a.candidates, b.candidates);
-  assert.equal(a.version, "0.2.1");
+  assert.equal(a.version, "0.2.2");
   assert.equal(a.readOnly, true);
   assert(a.candidates.every((c) => c.reasons.some((r) => r.includes("资格未校验"))));
 });
@@ -183,6 +184,7 @@ test("full pagination, max concurrency two, TTL, forced refresh joins inflight",
   assert.equal((await query(f)).source.cacheHit, true);
   f.advance(60000);
   await query(f);
+  await query(f, { refresh: true });
   assert.equal(f.calls.length, 8);
   await query(f, { forceRefresh: true });
   assert.equal(f.calls.length, 12);
@@ -192,6 +194,253 @@ test("full pagination, max concurrency two, TTL, forced refresh joins inflight",
   f.settings.fieldMapping.extra = "备注";
   await query(f);
   assert.equal(f.calls.length, 20);
+});
+test("normal refresh checks document signal; pinned analysis survives soft cache expiry", async () => {
+  let checks = 0;
+  const f = fixture(undefined, { readDocumentInfo: async () => { checks++; return { ok: true, modifyTime: "1", signal: "v1" }; } });
+  const a = await query(f);
+  assert.equal(typeof a.source.snapshotId, "string");
+  assert(a.source.snapshotId.length > 10);
+  assert.equal(f.calls.length, 1);
+  f.advance(61000);
+  const b = await query(f, { snapshotId: a.source.snapshotId, effort: 2 });
+  assert.equal(b.source.snapshotReused, true);
+  assert.equal(b.source.refreshing, false);
+  assert.equal(f.calls.length, 1);
+  const r = await query(f, { refresh: true });
+  assert.equal(r.source.reusedBySignal, true);
+  assert.equal(r.source.snapshotId, a.source.snapshotId);
+  assert.equal(r.generatedAt, a.generatedAt);
+  assert.notEqual(r.source.verifiedAt, a.source.verifiedAt);
+  assert.equal(f.calls.length, 1);
+  assert(checks >= 3);
+  await query(f, { forceRefresh: true });
+  assert.equal(f.calls.length, 2);
+});
+test("snapshot pin expires exactly at five minutes without extending on access", async () => {
+  const rows = [record(1)];
+  const f = fixture(rows);
+  const original = await query(f);
+  f.advance(4 * 60000 + 2);
+  rows.push(record(2));
+  const current = await query(f, { forceRefresh: true });
+  assert.notEqual(current.source.snapshotId, original.source.snapshotId);
+
+  f.advance(60000 - 3);
+  const before = await query(f, { snapshotId: original.source.snapshotId });
+  assert.equal(before.ok, true);
+  assert.equal(before.source.snapshotReused, true);
+  assert.equal(before.source.snapshotId, original.source.snapshotId);
+  assert.equal(before.tasks.length, 1);
+  assert.equal(f.calls.length, 2);
+
+  for (let i = 0; i < 2; i++) {
+    f.advance(1);
+    const expired = await query(f, { snapshotId: original.source.snapshotId });
+    assert.equal(expired.ok, true);
+    assert.equal(expired.source.snapshotReused, false);
+    assert.equal(expired.source.snapshotId, current.source.snapshotId);
+    assert.equal(expired.source.refreshing, false);
+    assert.equal(expired.tasks.length, 2);
+    assert.equal(f.calls.length, 2, "expired pin falls back to the still-fresh current snapshot");
+  }
+});
+
+test("stale queries return immediately and share a background refresh", async () => {
+  const rows = [record(1)];
+  let signal = "1";
+  let release;
+  let blocked = false;
+  const f = fixture(rows, { readDocumentInfo: async () => ({ ok: true, modifyTime: signal, signal }),
+    readRecords: async () => { if (blocked) await new Promise(resolve => { release = resolve; }); return { ok: true, total: rows.length, hasMore: false, records: structuredClone(rows) }; } });
+  const a = await query(f);
+  f.advance(61000); signal = "2"; blocked = true;
+  const b = await query(f);
+  assert.equal(b.source.refreshing, true);
+  assert.equal(b.source.stale, true);
+  assert.equal(b.source.snapshotId, a.source.snapshotId);
+  const waiting = query(f, { refresh: true });
+  while (!release) await new Promise(resolve => setTimeout(resolve, 1));
+  rows.push(record(2)); blocked = false; release();
+  const c = await waiting;
+  assert.equal(c.tasks.length, 2);
+  assert.equal(c.source.sharedInflight, true);
+  assert.notEqual(c.source.snapshotId, a.source.snapshotId);
+  const old = await query(f, { snapshotId: a.source.snapshotId });
+  assert.equal(old.tasks.length, 1);
+  assert.equal(old.source.stale, true);
+  assert.equal(old.source.refreshing, false);
+});
+test("unreliable signals and hard expiry force full reads; failures never look verified", async () => {
+  let valid = true;
+  let failed = false;
+  let reads = 0;
+  const f = fixture(undefined, { readDocumentInfo: async () => ({ ok: valid, modifyTime: valid ? "1" : "", signal: "v1" }),
+    readRecords: async () => { reads++; if (failed) throw Error("upstream-secret-body"); return { ok: true, total: 1, hasMore: false, records: [record(1)] }; } });
+  const a = await query(f);
+  valid = false;
+  await query(f, { refresh: true });
+  assert.equal(reads, 2);
+  valid = true;
+  await query(f, { refresh: true });
+  assert.equal(reads, 3, "invalid previous baseline must not reuse by signal");
+  f.advance(15 * 60000 + 1);
+  await query(f, { refresh: true });
+  assert.equal(reads, 4, "unchanged coarse document time is not trusted indefinitely");
+  failed = true;
+  const bad = await query(f, { forceRefresh: true });
+  assert.equal(bad.ok, false);
+  assert(!JSON.stringify(bad).includes("upstream-secret-body"));
+  const oldId = a.source.snapshotId;
+  const next = await query(f, { snapshotId: oldId });
+  assert.notEqual(next.source.snapshotId, oldId, "expired snapshot cannot be pinned");
+});
+test("refresh resets an unavailable target and estimate; normal task lookup remains strict", async () => {
+  const rows = [record(1), record(2)];
+  const f = fixture(rows);
+  await query(f);
+  rows[0].fields["前端开发"] = "Alice";
+  const r = await query(f, { forceRefresh: true, taskId: "r1", effort: 3 });
+  assert.equal(r.ok, true);
+  assert.equal(r.taskId, "r2");
+  assert.equal(r.source.selectionReset, true);
+  assert(r.candidates.every(c => c.quantified === false));
+  assert.equal((await query(f, { taskId: "r1" })).httpStatus, 404);
+});
+test("forced refresh cannot downgrade to a concurrent unchanged-signal check", async () => {
+  let release;
+  let block = false;
+  const f = fixture(undefined, { readDocumentInfo: async () => {
+    if (block) { block = false; await new Promise(resolve => { release = resolve; }); }
+    return { ok: true, modifyTime: "1", signal: "1" };
+  } });
+  await query(f);
+  block = true;
+  const normal = query(f, { refresh: true });
+  while (!release) await new Promise(resolve => setTimeout(resolve, 1));
+  const force = query(f, { forceRefresh: true });
+  release();
+  assert.equal((await normal).source.reusedBySignal, true);
+  const full = await force;
+  assert.equal(full.source.cacheHit, false);
+  assert.equal(f.calls.length, 2);
+});
+test("background failures have a cooldown and no orphan rejection or false verification", async () => {
+  let broken = false;
+  let count = 0;
+  const f = fixture(undefined, { readRecords: async () => {
+    count++;
+    if (broken) throw Error("upstream-secret");
+    return { ok: true, total: 1, hasMore: false, records: [record(1)] };
+  } });
+  const a = await query(f);
+  f.advance(61000); broken = true;
+  assert.equal((await query(f)).source.refreshing, true);
+  assert.equal((await query(f, { refresh: true })).ok, false);
+  const failed = await query(f);
+  assert.equal(failed.source.refreshing, false);
+  assert.equal(failed.source.stale, true);
+  assert(failed.source.refreshError);
+  assert.equal(failed.source.verifiedAt, a.source.verifiedAt);
+  assert.equal(count, 2);
+  f.advance(15 * 60000);
+  assert.equal((await query(f)).ok, false, "hard-expired cache must not be returned even on error");
+});
+test("failure cooldown automatically recovers on a normal query exactly at thirty seconds", async () => {
+  let broken = false;
+  let reads = 0;
+  let failed;
+  let recovered;
+  const failureDone = new Promise(resolve => { failed = resolve; });
+  const recoveryDone = new Promise(resolve => { recovered = resolve; });
+  const f = fixture(undefined, {
+    logger: {
+      warn: (event) => { if (event === "assignment_reference_background_refresh_failed") failed(); },
+      info: (event) => { if (event === "assignment_reference_read" && reads === 3) recovered(); }
+    },
+    readRecords: async () => {
+      reads++;
+      if (broken) throw Error("synthetic failure");
+      return { ok: true, total: 1, hasMore: false, records: [record(1)] };
+    }
+  });
+  const original = await query(f);
+  f.advance(60000);
+  broken = true;
+  assert.equal((await query(f)).source.refreshing, true);
+  await failureDone;
+  assert.equal(reads, 2);
+
+  broken = false;
+  f.advance(29999);
+  const cooling = await query(f);
+  assert.equal(cooling.ok, true);
+  assert.equal(cooling.source.snapshotId, original.source.snapshotId);
+  assert.equal(cooling.source.stale, true);
+  assert.equal(cooling.source.refreshing, false);
+  assert(cooling.source.refreshError);
+  assert.equal(cooling.source.verifiedAt, original.source.verifiedAt);
+  assert.equal(reads, 2, "upstream recovery must not bypass the cooldown");
+
+  f.advance(1);
+  const retrying = await query(f);
+  assert.equal(retrying.ok, true);
+  assert.equal(retrying.source.snapshotId, original.source.snapshotId);
+  assert.equal(retrying.source.stale, true);
+  assert.equal(retrying.source.refreshing, true);
+  await recoveryDone;
+  const healthy = await query(f);
+  assert.equal(healthy.ok, true);
+  assert.notEqual(healthy.source.snapshotId, original.source.snapshotId);
+  assert.notEqual(healthy.source.verifiedAt, original.source.verifiedAt);
+  assert.equal(healthy.source.stale, false);
+  assert.equal(healthy.source.refreshing, false);
+  assert.equal(healthy.source.refreshError, "");
+  assert.equal(reads, 3, "ordinary queries recover without explicit refresh or duplicate reads");
+});
+
+test("changed signal during a scan rejects the mixed snapshot and does not cache it", async () => {
+  let checks = 0;
+  const f = fixture(undefined, { readDocumentInfo: async () => ({ ok: true, modifyTime: String(++checks), signal: String(checks) }) });
+  const a = await query(f);
+  assert.equal(a.ok, false);
+  assert(a.message.includes("总表发生变化"));
+  const b = await query(f);
+  assert.equal(b.ok, false);
+  assert.equal(f.calls.length, 2);
+});
+test("snapshot IDs cannot bypass authorization, data source settings, or retention limits", async () => {
+  const f = fixture();
+  const a = await query(f);
+  assert.equal((await query(f, { userName: "Alice", snapshotId: a.source.snapshotId })).httpStatus, 403);
+  f.settings.docid = "other";
+  const b = await query(f, { snapshotId: a.source.snapshotId });
+  assert.notEqual(b.source.snapshotId, a.source.snapshotId);
+  f.settings.docid = "doc";
+  const c = await query(f, { snapshotId: a.source.snapshotId });
+  assert.notEqual(c.source.snapshotId, a.source.snapshotId);
+  const first = c.source.snapshotId;
+  for (let i = 0; i < 3; i++) await query(f, { forceRefresh: true });
+  assert.notEqual((await query(f, { snapshotId: first })).source.snapshotId, first);
+});
+test("late old-settings reads cannot replace or evict a new-settings snapshot", async () => {
+  let release;
+  const reads = [];
+  const f = fixture(undefined, { readRecords: async (s) => {
+    reads.push(s.docid);
+    if (s.docid === "A") await new Promise(resolve => { release = resolve; });
+    return { ok: true, total: 1, hasMore: false, records: [record(s.docid)] };
+  } });
+  f.settings.docid = "A";
+  const a = query(f, { forceRefresh: true });
+  while (!release) await new Promise(resolve => setTimeout(resolve, 1));
+  f.settings.docid = "B";
+  const b = await query(f);
+  release(); await a;
+  const pinned = await query(f, { snapshotId: b.source.snapshotId });
+  assert.equal(pinned.source.snapshotReused, true);
+  assert.equal(pinned.source.snapshotId, b.source.snapshotId);
+  assert.deepEqual(reads, ["A", "B"]);
 });
 test("failed page and incomplete source are not normal partial success", async () => {
   let calls = 0;
@@ -314,7 +563,7 @@ test("Shanghai midnight numeric dates align with explicitly offset workday reade
   assert.equal(a.gap, 1);
   assert(!r.calendar.workdays.includes("2026-10-18"));
   assert(!r.calendar.workdays.includes("2026-10-25"));
-  assert.deepEqual(options, [{ forceRefresh: false, utcOffsetMinutes: 480 }]);
+  assert.deepEqual(options, [{ forceRefresh: true, utcOffsetMinutes: 480 }]);
   await query(f, { forceRefresh: true });
   assert.deepEqual(options[1], { forceRefresh: true, utcOffsetMinutes: 480 });
   const beforeMidnight = fixture([record(1, { "开发截止日期": String(millis - 1) })]);
