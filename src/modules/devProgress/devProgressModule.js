@@ -1,5 +1,7 @@
 "use strict";
 
+const { createAssignmentReferenceService } = require("./assignmentReference");
+
 const fs = require("fs");
 const path = require("path");
 const {
@@ -2126,6 +2128,15 @@ function createDevProgressModule(options = {}) {
   const recordsReader = typeof options.readRecords === "function"
     ? options.readRecords
     : readDevProgressRecords;
+  const assignmentReference = createAssignmentReferenceService({
+    getSettings: settingsProvider,
+    getWorkflowRulesSettings: workflowRulesProvider,
+    readFieldDefinitions: fieldDefinitionsReader,
+    readWorkdayCalendar: workdayCalendarReader,
+    readRecords: recordsReader,
+    nowMs: nowMsProvider,
+    logger
+  });
   let h5MonitorCache = null;
   let h5MonitorRefreshPromise = null;
   let fullAnomalyScanPromise = null;
@@ -4174,6 +4185,7 @@ function createDevProgressModule(options = {}) {
     const settings = settingsProvider();
     return {
       version: DEV_PROGRESS_MODULE_VERSION,
+      assignmentReference: { version: "0.2.0", readOnly: true },
       enabled: Boolean(settings.enabled),
       source: settings.source,
       ready: Boolean(settings.ready),
@@ -4196,6 +4208,7 @@ function createDevProgressModule(options = {}) {
     listRequiredFieldItems,
     listPersonTaskItems,
     listMemberTaskItems,
+    queryAssignmentReference: assignmentReference.query,
     getDocumentChangeSignal,
     formatRequiredFieldPushMessage: requiredFieldPushMessage,
     exportRequiredFieldPushWorkbook,

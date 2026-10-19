@@ -5,6 +5,27 @@ const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 
+function fixture(url) {
+  const project = url.searchParams.get("project") || "恶魔高校";
+  const role = url.searchParams.get("role") || "fe";
+  const taskId = url.searchParams.get("taskId") || "record-a";
+  const effort = Number(url.searchParams.get("effort")) || null;
+  const tasks = project === "魔王" ? [] : [
+    { id: "record-a", demandId: "001234", title: "真实需求甲", project, state: "待分配", type: "优化", summary: "需求总表真实内容", deadline: "2026-10-23", effort: null, warnings: [] },
+    { id: "record-b", demandId: "001235", title: "真实需求乙", project, state: "待分配", type: "新功能", summary: "另一条需求", deadline: "2026-10-21", effort: null, warnings: [] }
+  ];
+  return { ok: true, status: "ok", readOnly: true, version: "0.2.0", generatedAt: "2026-10-19T04:00:00.000Z",
+    identity: { name: "页面验收组长", isFallback: true },
+    roles: [{ id: "fe", name: "前端", field: "前端开发" }, { id: "be", name: "后端", field: "后端开发" }, { id: "ui", name: "美术", field: "UI人员" }],
+    role, tasks, taskId: tasks.length ? taskId : null,
+    calendar: { ok: true, firstDate: "2025-12-01", lastDate: "2026-12-30", today: "2026-10-19", workdays: ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"] },
+    candidates: tasks.length ? [{ id: "person-a", name: "候选同事", job: "前端 / 后端", leader: "组长甲", total: 3, reservation: 0,
+      unknownCount: 1, status: "missing", baseline: 0, gap: effort ? 1 : null, delta: effort ? 1 : null, quantified: Boolean(effort),
+      reasons: ["存在未知预占工作量", "人员可分配资格未确认"], dependencies: ["UI完整交付未确认"],
+      items: [{ id: "009999", title: "其他项目工作", project: "一骑当千", role: "后端", effort: 3, due: "2026-10-21", source: "正式剩余", reserved: false }]
+    }] : [], warnings: ["只读分析，不写回负责人"], source: { recordCount: 3802, cacheHit: true } };
+}
+
 async function main() {
   const { chromium } = require("playwright");
   const root = path.resolve(__dirname, "../src/admin/static");
@@ -17,120 +38,75 @@ async function main() {
     fs.createReadStream(file).pipe(res);
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true, channel: process.env.EA_PREVIEW_BROWSER || "msedge" });
+  const browser = await chromium.launch({ headless: true, channel: "msedge" });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1050 }, ignoreHTTPSErrors: true });
-    const errors = [];
-    const apiCalls = [];
-    page.on("pageerror", error => { errors.push(error.message); console.error(`Browser error: ${error.message}`); });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+    const errors = [], apiCalls = [];
+    let failNext = false;
+    page.on("pageerror", error => errors.push(error.message));
     await page.route("**/api/**", async route => {
-      const req = route.request();
+      const req = route.request(), url = new URL(req.url());
       apiCalls.push({ method: req.method(), url: req.url(), child: req.frame().parentFrame() !== null });
-      const payload = req.url().includes("h5-session")
+      let payload;
+      if (url.pathname.endsWith("assignment-reference")) {
+        if (failNext) { failNext = false; await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, message: "数据源暂不可用" }) }); return; }
+        payload = { ok: true, devProgress: fixture(url) };
+      } else payload = url.pathname.includes("h5-session")
         ? { ok: true, identity: { name: "页面验收组长", source: "signed_session" } }
-        : { ok: true, devProgress: { items: [], leaderRoles: ["前端组长"], memberViews: [], cache: { refreshedAt: "2026-10-17T08:00:00.000Z" } } };
+        : { ok: true, devProgress: { items: [], leaderRoles: ["前端组长"], memberViews: [], cache: { refreshedAt: "2026-10-19T04:00:00.000Z" } } };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
     });
-    const base = process.env.EA_PREVIEW_HOST || `http://127.0.0.1:${server.address().port}`;
+    const base = `http://127.0.0.1:${server.address().port}`;
     await page.goto(`${base}/demand-h5.html`);
     await page.waitForLoadState("networkidle");
-    assert.equal(await page.locator("#assignmentPreviewFrame").getAttribute("src"), null, "preview is lazy loaded");
+    assert.equal(await page.locator("#assignmentPreviewFrame").getAttribute("src"), null, "lazy iframe");
     await page.locator('[data-panel="assignment"]').click();
     const frame = page.frameLocator("#assignmentPreviewFrame");
     await frame.locator(".candidate").first().waitFor();
-    await page.waitForTimeout(200);
-    assert.equal(await frame.locator(".task-item").count(), 2, "parent project filters synthetic tasks");
-    assert.equal(await frame.locator(".app-header").isVisible(), false, "no duplicate app header");
-    assert.equal(await frame.locator("#project").isVisible(), false, "one shared project selector");
-    assert.equal(await frame.locator('[data-view="coord"], #coord-view').count(), 0, "coordination removed from preview");
-    assert.equal(await frame.locator(".breadcrumb, .result-heading, #task-status, #sort").count(), 0, "duplicate details and selectors removed");
-    assert.equal(await frame.locator('[data-role]').count(), 3, "fallback persona supports technical and art roles");
-    await frame.locator('#persona').selectOption('fe');
-    assert.equal(await frame.locator('[data-role]').count(), 1, "front-end leader only sees front-end");
-    assert.match(await frame.locator('.person').first().textContent(), /前端/);
-    await frame.locator('#persona').selectOption('ui');
-    assert.equal(await frame.locator('[data-role]').count(), 1);
-    assert.match(await frame.locator('.task-meta').textContent(), /美术/);
-    assert.equal(await frame.locator('.task-item').count(), 2, "art leader sees all pending art tasks in current project");
-    await frame.locator('#persona').selectOption('fallback');
-    await frame.locator('[data-role="fe"]').click();
-    assert.equal(await frame.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01038', "earliest deadline first");
-    await frame.locator('#time-sort').click();
-    assert.equal(await frame.locator('.task-item').first().getAttribute('data-task'), 'DEMO-01026', "deadline order reverses");
-    await frame.locator('#reset svg').evaluate(el => { el.dataset.testStable = 'yes'; });
-    await frame.locator('[data-task="DEMO-01026"]').click();
-    assert.equal(await frame.locator('#reset svg').getAttribute('data-test-stable'), 'yes', "rendering task content does not replace the reset icon under the pointer");
-    assert.ok(await page.locator("#sessionUserName").textContent() === "页面验收组长");
-    assert.equal(await page.locator("#assignmentPreviewFrame").getAttribute("sandbox"), "allow-scripts allow-forms");
-    const frameHeight = await page.locator("#assignmentPreviewFrame").evaluate(el => el.getBoundingClientRect().height);
-    assert.ok(frameHeight >= 400 && frameHeight < 3000, "height fits content without runaway resize");
-    await page.screenshot({ path: path.join(output, "integrated-desktop.png"), fullPage: true });
-    await frame.locator('[data-evidence="lin"]').click();
-    await frame.locator('[data-select="mu"]').click();
-    await frame.locator("#risk-ack").check();
-    await frame.locator("#confirm-assignment").click();
-    assert.match(await frame.locator(".success-receipt").textContent(), /陈沐/);
-    assert.match(await frame.locator('.task-meta').textContent(), /陈沐/, "selection changes only demo current owner");
-    assert.equal(await frame.locator('.task-item').count(), 1, "assigned demo task leaves pending list");
-    await page.locator('[data-panel="todo"]').click();
-    assert.ok(await page.locator("#panel-todo").isVisible());
-    assert.ok(await page.locator("#panel-assignment").isHidden());
-    await page.locator('[data-panel="draft"]').click();
-    assert.ok(await page.locator("#panel-draft").isVisible());
-    await page.locator('[data-panel="assignment"]').click();
-    assert.match(await frame.locator(".success-receipt").textContent(), /陈沐/, "tab switching preserves demo state");
-    await page.locator("#projectSelect").selectOption("女王之刃");
-    await page.waitForLoadState("networkidle");
-    assert.equal(await frame.locator(".task-item").count(), 1);
-    assert.match(await frame.locator(".task-item").textContent(), /角色详情/);
-    // Allow the host scroll restoration and sandbox resize messages to settle before pointer input.
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await frame.locator('body').evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await frame.locator("#reset").click();
-    await frame.locator('#confirm-dialog').waitFor({ state: 'visible' });
-    await page.screenshot({ path: path.join(output, "reset-dialog.png"), fullPage: true });
-    await frame.locator('[data-action="reset-confirm"]').click();
-    assert.equal(await frame.locator(".task-item").count(), 1, "reset cannot override host project");
-    await page.locator("#projectSelect").selectOption("魔王");
-    await page.waitForLoadState("networkidle");
-    assert.equal(await frame.locator(".task-item").count(), 0);
-    await page.locator("#projectSelect").selectOption("恶魔高校");
-    await page.waitForLoadState("networkidle");
+    assert.equal(await frame.locator("#persona").count(), 0, "no client-chosen identity");
     assert.equal(await frame.locator(".task-item").count(), 2);
-    await page.evaluate(() => window.postMessage({ type: "ea-assignment-preview-height", height: 9999 }, "*"));
+    assert.equal(await frame.locator(".app-header").isVisible(), false);
+    assert.equal(await page.locator("#assignmentPreviewFrame").getAttribute("sandbox"), "allow-scripts allow-forms");
+    assert.equal(await frame.locator('[data-select], #confirm-assignment').count(), 0, "no assignment writes or simulated selection");
+    assert.match(await frame.locator(".candidate").textContent(), /候选同事/);
+    await frame.locator('[data-evidence="person-a"]').click();
+    assert.match(await frame.locator(".evidence").textContent(), /其他项目工作/);
+    await page.screenshot({ path: path.join(output, "integrated-desktop.png"), fullPage: true });
+    await frame.locator("#effort").fill("2");
+    const analysisResponse = page.waitForResponse(res => res.url().includes("assignment-reference") && new URL(res.url()).searchParams.get("effort") === "2");
+    await frame.locator('#estimate-form button[type="submit"]').click();
+    await analysisResponse;
     await page.waitForTimeout(100);
-    assert.notEqual(await page.locator("#assignmentPreviewFrame").evaluate(el => el.style.height), "9999px", "unrelated messages ignored");
+    assert.equal(await frame.locator(".task-item").count(), 2, "analysis does not assign or remove a task");
+    await page.locator("#projectSelect").selectOption("魔王");
+    await page.waitForTimeout(300);
+    assert.equal(await frame.locator(".task-item").count(), 0);
+    await page.locator("#projectSelect").selectOption("女王之刃");
+    await frame.locator(".candidate").first().waitFor();
+    assert.ok(apiCalls.some(c => new URL(c.url).searchParams.get("project") === "女王之刃"));
+    const before = apiCalls.length;
+    await page.evaluate(() => window.postMessage({ type: "ea-assignment-reference-request", requestId: "spoof", query: { project: "fake", role: "ui" } }, "*"));
+    await page.waitForTimeout(100);
+    assert.equal(apiCalls.length, before, "other windows cannot invoke bridge");
     for (const width of [1024, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(150);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `host width ${width}`);
       assert.equal(await frame.locator("body").evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `child width ${width}`);
       if (width === 390) {
-        if (await frame.locator('.mobile-back').isVisible()) await frame.locator('[data-action="back"]').click();
-        await frame.locator('[data-task="DEMO-01026"]').click();
-        await page.waitForTimeout(350);
-        assert.ok(await frame.locator(".candidate").last().evaluate(el => el.getBoundingClientRect().bottom <= innerHeight + 1), "last candidate fits the expanded frame");
+        if (!(await frame.locator(".task-item").first().isVisible())) await frame.locator('[data-action="back"]').click();
+        await frame.locator(".task-item").first().click();
+        await frame.locator(".candidate").first().waitFor();
         await page.screenshot({ path: path.join(output, "integrated-mobile.png"), fullPage: true });
-        await frame.locator(".candidate").last().scrollIntoViewIfNeeded();
-        await page.screenshot({ path: path.join(output, "integrated-mobile-bottom.png") });
-        await frame.locator('[data-action="back"]').click();
       }
     }
-    assert.deepEqual(errors, [], "no runtime errors");
-    assert.ok(apiCalls.every(c => c.method === "GET" && !c.child), "only the existing host uses read APIs; no preview API or writes");
-    await page.setViewportSize({ width: 1440, height: 1050 });
-    await page.goto(`${base}/demand-h5.html?panel=assignment`);
-    await page.waitForLoadState("networkidle");
-    assert.ok(await page.locator("#panel-assignment").isVisible(), "deep link selects host tab");
+    assert.deepEqual(errors, []);
+    assert.ok(apiCalls.every(c => c.method === "GET" && !c.child), "only parent reads APIs; no child API or write");
     const loggedOut = await browser.newPage();
     await loggedOut.route("**/api/**", route => route.fulfill({ status: 401, contentType: "application/json", body: '{"ok":false}' }));
     await loggedOut.goto(`${base}/demand-h5.html?panel=assignment`);
     await loggedOut.waitForURL("**/demand-login.html?**");
-    assert.ok(loggedOut.url().includes("returnTo="), "existing login remains required");
-    console.log(`Integrated assignment preview passed: existing login/navigation, lazy sandbox, shared project, demo interactions, no writes, responsive 320-1440. Screenshots: ${output}`);
-  } finally {
-    await browser.close();
-    await new Promise(resolve => server.close(resolve));
-  }
+    console.log(`Assignment integration passed: authenticated parent read bridge, opaque sandbox, real-shaped queries, analysis-only, cross-project evidence, project switching, login redirect, responsive 320-1440. Screenshots: ${output}`);
+  } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

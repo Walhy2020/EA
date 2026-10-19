@@ -721,7 +721,7 @@ async function fetchRecordsByFieldIds(settings, accessToken, sheetId, fieldIds, 
   return data.errcode === 0 ? collectRecords(data) : [];
 }
 
-function calendarDateLabel(value) {
+function calendarDateLabel(value, utcOffsetMinutes = 0) {
   const text = String(value === null || value === undefined ? "" : value).trim();
   if (!text) {
     return "";
@@ -729,7 +729,7 @@ function calendarDateLabel(value) {
   const numeric = Number(text);
   if (Number.isFinite(numeric) && numeric > 0) {
     const millis = numeric > 1000000000000 ? numeric : numeric * 1000;
-    const date = new Date(millis);
+    const date = new Date(millis + utcOffsetMinutes * 60000);
     return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
   }
   const match = text.match(/(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
@@ -754,7 +754,8 @@ async function readDevProgressWorkdayCalendar(settings, options = {}) {
   const sheetName = String(options.sheetName || calendar.sheetName || "工作日").trim();
   const dateField = String(options.dateField || calendar.dateField || "日期").trim();
   const cacheMinutes = Math.max(1, Number(options.cacheMinutes || calendar.cacheMinutes || 15));
-  const cacheKey = [settings.docid || "", sheetName, dateField].join("|");
+  const utcOffsetMinutes = Number.isFinite(options.utcOffsetMinutes) ? options.utcOffsetMinutes : 0;
+  const cacheKey = [settings.docid || "", sheetName, dateField, utcOffsetMinutes].join("|");
   const cached = workdayCalendarCache.get(cacheKey);
   if (!options.forceRefresh && cached && Date.now() - cached.cachedAt < cacheMinutes * 60 * 1000) {
     return { ...cached.value, cacheHit: true };
@@ -852,7 +853,7 @@ async function readDevProgressWorkdayCalendar(settings, options = {}) {
     }
   }
 
-  const dates = uniqueNonEmpty(records.map((record) => calendarDateLabel(recordValues(record)[dateField])))
+  const dates = uniqueNonEmpty(records.map((record) => calendarDateLabel(recordValues(record)[dateField], utcOffsetMinutes)))
     .sort();
   const value = {
     ok: dates.length > 0,
@@ -1268,6 +1269,7 @@ async function readDevProgressDocumentInfo(settings) {
 }
 
 module.exports = {
+  __test: { calendarDateLabel },
   applyLookupFallbacks,
   normalizeDevProgressRecord: normalizeRecord,
   previewDevProgressRecords,

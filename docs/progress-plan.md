@@ -850,3 +850,14 @@ node src\main.js --test-message top20
 | 2026-09-04 | EA 系统 v0.7.7 已让需求监控完整扫描直接同步需求进度管理 H5 缓存；页面升至 v0.3.2，并补充刷新入口版本、刷新标记和缓存结果日志 |
 | 2026-09-04 | EA 系统 v0.7.8 已将需求监控手动刷新改为最近任务优先精确刷新、变更后后台全量校准；页面和定时监控共用全量扫描，分页最多 2 页并发，页面四个区域并行读取，需求进度管理升至 v0.3.3 |
 | 2026-09-04 | EA 系统 v0.7.9 已让需求监控区分字段空值与已填写但不合规：空值显示缺失，数值、日期或状态异常显示需修正并带当前值/规则；V0004 判断不变，需求进度管理升至 v0.3.4 |
+
+## M02 Assignment Reference Read-Only Integration - 2026-10-19
+
+- EA v0.7.20; assignment reference v0.2.0.
+- User scope: live queries and analysis only; no owner writes or notifications.
+- Added signed-session read API, server-side role scopes, real demand/calendar/configured personnel sources, shared snapshot cache and conservative capacity evidence.
+- Replaced synthetic preview/persona/assignment actions with live loading, error, empty, role, effort and evidence views; preserved sandbox and existing demand navigation.
+- Known limits: configured personnel are not a complete eligibility registry; unknown reservation, multi-owner split and dependency evidence remain explicitly unknown. No claim of joint scheduling feasibility.
+- Verification: 31 engine scenarios, signed-session API tests, opt-in Shanghai calendar tests, standalone/integrated Playwright tests at 320-1440px, syntax (130 files), real config validation, existing fast-refresh/cache-sync/project-settings/field-display regressions passed.
+- Live read verified 3802 records over 8 pages; first cold read about 31 seconds, same snapshot reused across tasks and authorized leaders. Company calendar is read in Shanghai time for this feature only; legacy monitoring calendar behavior is unchanged.
+- Deployed scoped files and restarted the verified EA child through its existing hidden supervisor; current PID 38116. Status reports EA 0.7.20 and assignment reference 0.2.0/readOnly. Anonymous assignment query remains HTTP 401.

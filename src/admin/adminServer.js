@@ -2096,6 +2096,36 @@ function createAdminServer(options) {
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/dev-progress/assignment-reference") {
+      const identity = requireDemandH5Identity(req, res, url.pathname);
+      if (!identity) return true;
+      const startedAt = Date.now();
+      const result = await modules.devProgress.queryAssignmentReference({
+        userName: identity.name,
+        project: url.searchParams.get("project") || "",
+        role: url.searchParams.get("role") || "",
+        taskId: url.searchParams.get("taskId") || "",
+        effort: url.searchParams.get("effort"),
+        forceRefresh: url.searchParams.get("forceRefresh") === "1"
+      });
+      logger.info("Demand H5 assignment reference requested", {
+        sessionId: identity.sessionId,
+        role: result.role || "",
+        status: result.status,
+        taskCount: result.tasks?.length || 0,
+        candidateCount: result.candidates?.length || 0,
+        cacheHit: Boolean(result.source?.cacheHit),
+        readOnly: true,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, result.ok ? 200 : (result.httpStatus || 400), {
+        ok: result.ok,
+        devProgress: result,
+        message: result.message || ""
+      });
+      return true;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/dev-progress/required-field-items") {
       const identity = requireDemandH5Identity(req, res, url.pathname);
       if (!identity) return true;
